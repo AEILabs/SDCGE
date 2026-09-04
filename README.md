@@ -54,7 +54,7 @@ Julia packages (installed automatically by `Pkg.instantiate()`):
 | `JuMP`, `PATHSolver`, `Complementarity` | MCP formulation and PATH solver interface |
 | `DataFrames` | Results tables |
 | `XLSX` | Excel SAM input, dynamic/scenario workbooks |
-| `Plots` | Optional charts of results and trajectories |
+| `Plots` | Optional charts of results and trajectories — set `LCGE_NO_PLOTS=1` before loading `src/LinkageModel.jl` to skip `Plotting.jl` entirely (the `plot_*` functions are then undefined; nothing else changes) |
 
 ---
 
@@ -183,6 +183,35 @@ results = run_policy_experiments!("data/policy_experiments.xlsx";
 ```
 
 See `examples/07_recursive_dynamics.jl` and `08_policy_experiments.jl`.
+
+### One scenario, in memory
+
+`run_scenario!` runs a single `Scenario` without the Excel round trip and without
+writing anything, and gives an embedding caller (a web backend, a batch driver) the
+three hooks it needs: a per-period callback, a cooperative abort flag, and a
+`period_modifier` for the levers the `Scenario` struct does not carry — tariffs
+(`:tau_m`), the output tax (`:tau_p`), the direct tax (`:kappa_h`), the government
+spending share (`:chi_gov`).
+
+```julia
+data = init_data()
+prepare_data!(data; source=:csv, sam_path="data/csv/sam.csv",
+              outdir=nothing)               # nothing ⇒ write no SAM report
+
+scen = Scenario(1, "tariff_cut", "", 10, 0.05,
+                Dict((i, t) => 1.0 for i in data.sets[:i], t in 1:10),   # AT levels
+                Dict((l, t) => 0.0 for l in data.sets[:l], t in 1:10),   # g_labor rates
+                zeros(10), zeros(10))                                    # g_land, g_nres
+
+stop = Ref(false)
+history, snapshots = run_scenario!(data, scen;
+    on_period = (t, status, secs, h) -> println("period $t: $status in $secs s"),
+    abort = stop,
+    period_modifier = (t, d) -> (parameters(d)[:tau_m][("R1","R2","P001")] = 0.0))
+```
+
+`history` is one named tuple of macro indicators per period; `snapshots` is every
+solved variable of every period, keyed `(variable, index_labels)`.
 
 ---
 
