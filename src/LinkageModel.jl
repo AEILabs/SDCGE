@@ -38,7 +38,15 @@ include("Other.jl")
 # the static-model cleanup. Recursive dynamics is implemented in
 # RecursiveDynamic.jl / PolicyScenarios.jl instead.
 include("Results.jl")
-include("Plotting.jl")
+# Plotting.jl is the only file that needs Plots.jl (and, transitively, GR and ~200 further
+# packages).  Callers that render their own charts — a web backend, a headless batch run —
+# can set LCGE_NO_PLOTS=1 before loading this file to skip it, in which case plot_results,
+# plot_dynamic_results, plot_all_scenarios and export_results_and_plots! are simply not
+# defined (the names below are still exported, which is legal and harmless).
+const LCGE_WITH_PLOTS = !(lowercase(get(ENV, "LCGE_NO_PLOTS", "")) in ("1", "true", "yes"))
+if LCGE_WITH_PLOTS
+    include("Plotting.jl")
+end
 include("Diagnostics.jl")
 include("ModelBuilder.jl")
 include("RecursiveDynamic.jl")
