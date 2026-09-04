@@ -52,7 +52,7 @@ include("ModelBuilder.jl")
 include("RecursiveDynamic.jl")
 include("PolicyScenarios.jl")
 
-export LinkageData, init_data, default_sets!, setup_sam_accounts!, build_default_large_sam!,
+export LinkageData, init_data, default_sets!, read_sets_csv!, setup_sam_accounts!, build_default_large_sam!,
        read_sam_csv!, read_sam_excel!, validate_sam!, balance_sam_ras!, sam_balance_table, sam_balance_summary, assert_balanced_sam!, export_sam_balance_report!, export_balanced_sam!, calibrate_from_sam!,
        precompute_parameters, sanitize_parameters!, parameter_diagnostics, parameters, prepare_data!, add_variables!, initialize_from_sam!, enforce_nlp_safe_bounds_and_starts!, initialization_diagnostics, check_initialization!,
        results_dataframe, export_results!, solve_and_save!, plot_results, export_results_and_plots!,

@@ -46,12 +46,16 @@ const _POL_SHEETS = (
 # ─── Template writer ─────────────────────────────────────────────────────────
 
 """
-    write_policy_template(path::AbstractString; periods=10, n_scenarios=10)
+    write_policy_template(path::AbstractString; periods=10, n_scenarios=10, data=...)
 
 Create a starter Excel workbook for policy experiments.  All values default to
 the benchmark (`AT = 1`, `g_labor = 0.02`, `g_land = g_nres = 0`) so that
 running the file unchanged reproduces 10 identical baseline runs.  Open the
 file in Excel and overwrite cells to design experiments.
+
+The `AT_by_activity` sheet has one row per (scenario, activity), so pass the
+`data` whose `sets[:i]` the experiments will use when that is not the default
+100-sector list; the crop/industry scenarios 7 and 8 read `sets[:cr]`/`sets[:ip]`.
 
 Sheets:
 - `scenarios`        – one row per simulation (sim_id, name, description,
@@ -62,13 +66,16 @@ Sheets:
 - `g_nres`           – natural-resource growth by (sim_id, period)
 """
 function write_policy_template(path::AbstractString;
-        periods::Int=10, n_scenarios::Int=10)
+        periods::Int=10, n_scenarios::Int=10,
+        data::LinkageData=default_sets!(init_data()))
 
-    # We need the sector / skill names to size the sheets; the SAM defaults are
-    # the canonical 100 products and 2 skill types.
-    data = init_data(); default_sets!(data)
-    activities = data.sets[:i]   # 100 sectors
+    # We need the sector / skill names to size the sheets; they come from the
+    # sets of `data` (by default the canonical 100 products and 2 skill types).
+    default_sets!(data)
+    activities = data.sets[:i]   # N sectors
     skills     = data.sets[:l]   # ["UnSkLab", "SkLab"]
+    crops      = data.sets[:cr]
+    industry   = data.sets[:ip]
 
     period_cols = ["period_$(t)" for t in 1:periods]
     mkpath(dirname(path))
@@ -89,8 +96,8 @@ function write_policy_template(path::AbstractString;
             (4, "fast_labor",     "labor force grows 3%/period"),
             (5, "slow_labor",     "labor force grows 1%/period"),
             (6, "land_growth",    "land supply grows 1%/period"),
-            (7, "TFP_in_crops",   "2% TFP growth, crops only (P001-P010)"),
-            (8, "TFP_in_industry","2% TFP growth, industrial sectors P021-P100"),
+            (7, "TFP_in_crops",   "2% TFP growth, crops only (set cr)"),
+            (8, "TFP_in_industry","2% TFP growth, non-agricultural sectors (set ip)"),
             (9, "high_depreciation","capital depreciation 10% (vs 5% baseline)"),
             (10,"all_growth",     "TFP 2% + labor 3% + land 0.5%"),
         ]
@@ -114,7 +121,7 @@ function write_policy_template(path::AbstractString;
             for ii in activities
                 at[XLSX.CellRef(row, 1)] = sid
                 at[XLSX.CellRef(row, 2)] = ii
-                vals = _default_AT_path(sid, ii, periods)
+                vals = _default_AT_path(sid, ii, periods; crops=crops, industry=industry)
                 for t in 1:periods
                     at[XLSX.CellRef(row, t+2)] = vals[t]
                 end
@@ -167,7 +174,8 @@ end
 
 # ─── Defaults for each scenario ──────────────────────────────────────────────
 
-function _default_AT_path(sid::Int, activity, periods::Int)
+function _default_AT_path(sid::Int, activity, periods::Int;
+        crops=String[], industry=String[])
     # AT level path; cumulative growth from period 1.
     if sid == 1                               # baseline
         return ones(Float64, periods)
@@ -175,15 +183,12 @@ function _default_AT_path(sid::Int, activity, periods::Int)
         return [(1.015)^(t-1) for t in 1:periods]
     elseif sid == 3                           # low TFP (all activities, 0.5%)
         return [(1.005)^(t-1) for t in 1:periods]
-    elseif sid == 7                           # crops-only TFP (2%)
-        is_crop = startswith(string(activity), "P0") &&
-                  parse(Int, string(activity)[2:end]) <= 10
-        return is_crop ? [(1.02)^(t-1) for t in 1:periods] :
-                          ones(Float64, periods)
-    elseif sid == 8                           # industrial sectors TFP (2%)
-        ai = parse(Int, string(activity)[2:end])
-        return (ai >= 21) ? [(1.02)^(t-1) for t in 1:periods] :
-                            ones(Float64, periods)
+    elseif sid == 7                           # crops-only TFP (2%), S[:cr]
+        return (activity in crops) ? [(1.02)^(t-1) for t in 1:periods] :
+                                     ones(Float64, periods)
+    elseif sid == 8                           # non-agricultural sectors TFP (2%), S[:ip]
+        return (activity in industry) ? [(1.02)^(t-1) for t in 1:periods] :
+                                        ones(Float64, periods)
     elseif sid == 10                          # all growth: 2% TFP everywhere
         return [(1.02)^(t-1) for t in 1:periods]
     else

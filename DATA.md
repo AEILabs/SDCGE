@@ -1,7 +1,8 @@
 # DATA.md — building a real-country SAM for LCGE-V4 (`LinkageModel`)
 
 This document specifies what data this model needs and the exact format/shape it must take:
-files, the 216-account list and order, what each block of the matrix must contain, sign
+files, the 2N+16 account list and order (216 for the default 100 sectors), what each block of
+the matrix must contain, sign
 conventions, the balance requirement, every derived parameter and its formula, the scenario
 workbook, and the in-memory `Scenario` struct. It does **not** prescribe where your source data
 should live — every loader below takes a path argument, so location is the caller's choice. A
@@ -16,11 +17,14 @@ All citations are `file:line` against branch `eps-integration` of this repo as c
 
 LCGE-V4 needs one square, balanced **Social Accounting Matrix (SAM)** with:
 
-- **100 activities** and **100 commodities** (one-to-one, LINKAGE-style — activity `i` produces
-  commodity `i`), grouped internally as crops (`P001`–`P010`), livestock (`P011`–`P020`), energy
-  (`P071`–`P075`), fertiliser (`P076`–`P078`), and "rest" (everything else) — this grouping drives
-  which production nest a sector uses, not just a label (`src/Calibration.jl:69-71,121-127`;
-  sets defined in `src/Types.jl:52-59`).
+- **N activities** and **N commodities** (one-to-one, LINKAGE-style — activity `i` produces
+  commodity `i`), grouped internally into crops (`:cr`), livestock (`:lv`), energy (`:e`),
+  fertiliser (`:ft`), feed (`:fd`) and "rest" (everything else) — this grouping drives which
+  production nest a sector uses, not just a label (`src/Calibration.jl:69-71,121-127`; sets
+  defined in `src/Types.jl`). N defaults to 100 with the positional groups crops `P001`–`P010`,
+  livestock `P011`–`P020`, energy `P071`–`P075`, fertiliser `P076`–`P078`; **any other sector
+  list is supplied by file** with `prepare_data!(...; sets_path=...)`, which must then also
+  carry `cr`, `lv`, `e`, `ft`, `fd` (`ft` and `fd` disjoint from `e`) — see §4.
 - **5 factors**: two labour skills (unskilled, skilled), capital, land, one sector-specific
   "natural resource" (`src/SAM.jl:15`).
 - **2 capital vintages** (Old/New) — not a SAM account; a per-sector split applied after loading
@@ -32,8 +36,8 @@ LCGE-V4 needs one square, balanced **Social Accounting Matrix (SAM)** with:
   world (`src/SAM.jl:17`).
 - **1 trade-margin account** (`src/SAM.jl:18`).
 
-That is 100+100+5+6+4+1 = **216 accounts**, verified directly against
-`data/csv/sam_accounts.csv` (217 lines = 1 header + 216 accounts).
+That is N+N+5+6+4+1 = **2N + 16 accounts**; for the default N = 100 that is **216**, verified
+directly against `data/csv/sam_accounts.csv` (217 lines = 1 header + 216 accounts).
 
 Beyond the SAM, the **dynamic** extension needs: a labour-supply growth rate per skill per
 period, a total-factor-productivity path per activity per period, an economy-wide land-supply
@@ -58,10 +62,11 @@ data; every one defaults to 0.5 (§2.3).
   overrides.
 - **No base year, no currency.** Nothing in `LinkageData`, `SAM.jl` or `Calibration.jl`
   references a year or a currency/unit; SAM cell values are plain dimensionless magnitudes.
-- **The loader hard-requires exactly the 216 accounts, in exactly the order of
-  `data/csv/sam_accounts.csv`.** `read_sam_csv!`/`read_sam_excel!` compare row labels to column
-  labels and error on any mismatch (`src/SAM.jl:150,179`); nothing discovers a different sector
-  count or a different account ordering from the file itself (§4).
+- **The loader requires exactly the 2N + 16 accounts the model derives from `data.sets[:i]`**
+  (the 216 of `data/csv/sam_accounts.csv` for the default sectors). `read_sam_csv!`/
+  `read_sam_excel!` compare row labels to column labels, then compare the file's labels to
+  `data.sam_accounts[:all]` as a set and name the mismatches. The sector list itself comes from
+  `sets_path`, not from the SAM file (§4).
 
 ---
 
@@ -74,15 +79,20 @@ Two loaders, both invoked through `prepare_data!(data; source=..., sam_path=...)
 
 | `source` | Function | Format |
 |---|---|---|
-| `:csv` | `read_sam_csv!(data, sam_path)` (`src/SAM.jl:145-158`) | A CSV whose first row and first column hold the 216 account labels; cell `[r+1,c+1]` is the flow from column account `c` to row account `r`. |
-| `:excel` | `read_sam_excel!(data, sam_path; sheet="SAM")` (`src/SAM.jl:170-187`) | A workbook with a sheet named `SAM`; the reader reads the **fixed range `A1:<217th column><217>`** sized off the known 216-account layout (`src/SAM.jl:172-175`) — it does not discover the account count from the sheet, so the sheet must be exactly 217×217 (216 accounts + header row/column). |
+| `:csv` | `read_sam_csv!(data, sam_path)` | A CSV whose first row and first column hold the 2N+16 account labels; cell `[r+1,c+1]` is the flow from column account `c` to row account `r`. |
+| `:excel` | `read_sam_excel!(data, sam_path; sheet="SAM")` | A workbook with a sheet named `SAM`; the reader sizes the range `A1:<(2N+17)th column><2N+17>` from `length(data.sam_accounts[:all])`, i.e. from `data.sets[:i]`, so the sheet must be exactly (2N+17)×(2N+17) — 217×217 at N = 100. |
 
-Both readers require `row_accounts == col_accounts` exactly, i.e. the same 216 labels in the
-same order on both axes (`src/SAM.jl:150,179`), and both hand off to `set_sam!`
+A third keyword, `sets_path`, reads the sector list and its groupings from a two-column
+`set,item` CSV *before* any of this (`read_sets_csv!`); it is what makes N ≠ 100 possible (§4).
+
+Both readers require `row_accounts == col_accounts` exactly, i.e. the same 2N+16 labels in the
+same order on both axes, and both hand off to `set_sam!`
 (`src/SAM.jl:31-39`), which re-derives `data.sam_index` from whatever label list was read — so
 a caller *can* supply its own account list/order, but every other part of the pipeline
-(`calibrate_from_sam!`, all equation files) hard-codes lookups by the canonical `ACT_P001`…
-`TRD_MRG` names, so in practice the labels must match `sam_accounts.csv` verbatim (§4).
+(`calibrate_from_sam!`, all equation files) looks up `ACT_<code>`/`COM_<code>` for the codes in
+`data.sets[:i]` plus the fixed `LAB_UNSK`…`TRD_MRG` names, so the labels must match the account
+list `setup_sam_accounts!` derives — `read_sam_csv!`/`read_sam_excel!` now check this and name
+the missing/unexpected labels instead of failing later inside `calibrate_from_sam!`.
 
 The repository's own bundled example illustrates the shape: `data/csv/sam.csv` (216×216 data +
 label row/column) paired with `data/csv/sam_accounts.csv`, or the `SAM` sheet of
@@ -92,7 +102,10 @@ is 217×217, sheet `SAM_Accounts` is 217×3 with columns `group,account,label`, 
 `account,row_sum,column_sum,gap,abs_gap`). These are illustrations of the format, not a
 prescribed location — `sam_path` is a caller-supplied argument.
 
-### 2.2 The 216-account list, in order (from `data/csv/sam_accounts.csv`, verified)
+### 2.2 The 2N+16-account list, in order — shown for the default N = 100 (from `data/csv/sam_accounts.csv`, verified)
+
+For any other sector list the shape is the same: `ACT_<code>` for every code of `data.sets[:i]`
+in file order, then `COM_<code>` in the same order, then the fixed 16 non-sector accounts.
 
 | Rows (1-indexed) | Group | Codes | Count |
 |---|---|---|---|
@@ -108,9 +121,9 @@ prescribed location — `sam_path` is a caller-supplied argument.
 | 213–216 | institutions | `HH`, `GOV`, `INV`, `ROW` | 4 |
 | 217 | margins | `TRD_MRG` | 1 |
 
-Total 216 accounts (100+100+5+6+4+1), constructed by `setup_sam_accounts!`
-(`src/SAM.jl:9-25`), asserted in `test/runtests.jl:13`
-(`@test length(data.sam_accounts[:all]) == 216`).
+Total 2N+16 accounts (N+N+5+6+4+1) = 216 at N = 100, constructed by `setup_sam_accounts!`
+from `data.sets[:i]`, asserted in `test/runtests.jl`
+(`@test length(data.sam_accounts[:all]) == 2 * length(data.sets[:i]) + 16`).
 
 ### 2.3 What each block must contain, and orientation
 
@@ -315,8 +328,8 @@ caller doesn't race on `"results/"`.
 
 | Need | Loader limitation (code) | Data-availability question |
 |---|---|---|
-| **Sector concordance / N≠100 sectors** | `read_sam_csv!`/`read_sam_excel!` require the row and column labels to match exactly (`SAM.jl:150,179`); nothing discovers a different account count from the file. A country whose native classification has fewer or more sectors than 100 must be aggregated/padded to exactly 100 pseudo-sectors in the fixed `P001..P100` order. **Not implemented: no N≠100 loader path.** Beyond the count, the LINKAGE production nests branch on sector *position* (`crset`/`lvset`/`eset`/`ftset`/`fdset`, `Calibration.jl:69-71,121-127`), so the concordance must also respect which of your sectors plays "crops" (`P001-P010`), "livestock" (`P011-P020`), "energy" (`P071-P075`) and "fertiliser" (`P076-P078`) — not just supply 100 sectors in any order. | An ISIC/HS↔this-model correspondence table is a data-engineering task the caller must do; the model provides no crosswalk. |
-| **Real regional/bilateral trade shares** | The SAM has no regional dimension at all — a single national SAM in, and `beta_1`/`beta_2`/`beta_w`/`beta_z` stay at their uniform `ParameterTables.jl` defaults (§2.6) regardless of what is loaded, because `calibrate_from_sam!` never writes them. They enter `src/Trade.jl` at T-3/T-5/T-7 (source-region tiering, `Trade.jl:49-75`) and T-18/T-19 (CET bilateral export allocation, `Trade.jl:119-136`). **Not implemented: no loader path writes region-specific shares from data.** | Whether a country-level 4-region or bilateral breakdown even exists (e.g. from a regionalised IO table) is a separate availability question from the missing code path. |
+| **Sector concordance / N≠100 sectors** | **Implemented.** `prepare_data!(...; sets_path=<set,item CSV>)` reads the sector list into `data.sets[:i]` and derives the 2N+16 SAM accounts from it; the equation layer is generic in N and in the cardinality of `cr`/`lv`/`e`/`ft`/`fd`, so your own codes (GTAP `pdr`, `wht`, …) can be used directly. What you still supply yourself: the memberships `cr`, `lv`, `e`, `ft`, `fd` — the LINKAGE production nests branch on them, not on a label, and the positional defaults (crops = first 10, energy = 71:75, …) only apply to `P001..P100`; `default_sets!` errors rather than applying them to a different N. Constraints the equations impose: `ft ∩ e = ∅` and `fd ∩ e = ∅` (an overlap gives an `XAp` column two equations and breaks squareness), `|e| ≥ 1`, `|ft| ≥ 1` if `|cr| ≥ 1`, `|fd| ≥ 1` if `|lv| ≥ 1`, `|ag| ≥ 1`. `ag`, `ip`, `nf`, `nnft`, `nnfd` are derived. | An ISIC/HS↔your-codes correspondence table is a data-engineering task the caller must do; the model provides no crosswalk. |
+| **Real regional/bilateral trade shares** | The SAM has no regional dimension at all — a single national SAM in, and `beta_1`/`beta_2`/`beta_w`/`beta_z` stay at their uniform `ParameterTables.jl` defaults (§2.6) regardless of what is loaded, because `calibrate_from_sam!` never writes them. The four pseudo-regions therefore only spread the national trade totals over 16 uniform `(r, rp)` cells; a `sets.csv` line `r,R1` collapses them to one region, which builds square and replicates the benchmark while cutting the bilateral blocks by `|r|²`. They enter `src/Trade.jl` at T-3/T-5/T-7 (source-region tiering, `Trade.jl:49-75`) and T-18/T-19 (CET bilateral export allocation, `Trade.jl:119-136`). **Not implemented: no loader path writes region-specific shares from data.** | Whether a country-level 4-region or bilateral breakdown even exists (e.g. from a regionalised IO table) is a separate availability question from the missing code path. |
 | **Base year and currency** | Nothing in `LinkageData`/`SAM.jl`/`Calibration.jl` carries a year or currency field; SAM values are unitless. | Purely a metadata-tracking task for the caller (the web app's `dataset.toml`/`registry.toml`, §6, carry `base_year`/`currency` fields precisely because the model doesn't). |
 | **Real elasticities** | `sigma_p`, `sigma_v`, `sigma_f`, `sigma_e`, `sigma_h`, `sigma_k`, `sigma_feed`, `sigma_ep`, `sigma_ft`, `sigma_fd` are **calibration-locked**: changing them means editing `Calibration.jl`'s single `LCGE_SIGMA` constant (or generalising it to a per-nest value) and re-deriving every `alpha_*`/`beta_*` share, since the share formulas embed `σ` (`Calibration.jl:57,76,259-301`). The remaining elasticities in §2.6 (Armington/CET tiers, migration, factor supply, consumption) are free-standing `PAR` entries a caller can overwrite post-`prepare_data!` with no recalibration needed. | No elasticity file format exists at all (`CLAUDE.md:39`, confirmed — no elasticity data anywhere in `data/`); a real-country elasticity set (e.g. GTAP-derived Armington elasticities) would need a small hand-authored table and a short loader you write yourself. |
 | **Labour-force projections for `g_labor`** | `g_labor` is always a **compounding rate** applied uniformly per skill per period, either as a scalar (`update_period_data!`, `RecursiveDynamic.jl:222-238`) or a `Dict{(skill,period)=>rate}` (`Scenario.g_labor`, `PolicyScenarios.jl:32,335-342`). There is no "supply an absolute level path" option (documented gap; still true on this branch). | Converting a population/labour-force projection (e.g. by education level, as a proxy for skill) into per-period compounding rates is a transformation the caller must do before calling `run_recursive_dynamic!`/`run_scenario!`. |
@@ -348,15 +361,18 @@ argument you choose.
 
 ### Step-by-step recipe to assemble, balance and validate a new SAM
 
-1. Fix a 100-sector concordance from your source classification to `P001..P100`, respecting the
-   crop/livestock/energy/fertiliser positional groups (§4), and lay out the 216 account labels in
-   exactly the order of `data/csv/sam_accounts.csv` (§2.2).
+1. Fix your sector list. Either map your source classification onto `P001..P100`, respecting the
+   crop/livestock/energy/fertiliser positional groups (§4), or write a `set,item` CSV listing `i`
+   and the memberships `cr`, `lv`, `e`, `ft`, `fd` for your own N codes and pass it as
+   `sets_path`. Then lay out the 2N+16 account labels — `ACT_<code>`, `COM_<code>`, then the 16
+   fixed accounts — in the order of `data/csv/sam_accounts.csv` (§2.2).
 2. Populate each block per §2.3: intermediate use, factor payments, output/intermediate taxes,
    imports/tariffs/margins, exports/export tax, final demand by institution. Leave `TAX_FACT`/
    `TAX_INC` at zero unless you plan to extend `calibrate_from_sam!` to read them (§2.5).
 3. Write the matrix as a CSV (labelled first row/column) or the `SAM` sheet of an XLSX workbook
-   with the fixed `217×217` range (§2.1), and call
-   `prepare_data!(init_data(); source=:csv_or_:excel, sam_path=<your path>)`.
+   with a `(2N+17)×(2N+17)` range (§2.1), and call
+   `prepare_data!(init_data(); sets_path=<your sets CSV or nothing>, source=:csv_or_:excel,
+   sam_path=<your path>)`.
 4. Let `balance_sam_ras!` reconcile row/column gaps automatically (default), or pre-balance the
    matrix yourself and pass `balance=:none` to `prepare_data!`.
 5. Check `sam_balance_summary(data)` — `balanced == true` and `max_abs_gap` at machine-epsilon

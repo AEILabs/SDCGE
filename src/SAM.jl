@@ -1,10 +1,87 @@
 # Usage examples:
 #   data = init_data(); default_sets!(data); setup_sam_accounts!(data)
-#   build_default_large_sam!(data)       # creates an internally generated 100-sector SAM
+#   build_default_large_sam!(data)       # creates an internally generated N-sector SAM
 #   read_sam_csv!(data, "data/csv/sam.csv")
 #   balance_sam_ras!(data)
 #
+#   data = init_data(); read_sets_csv!(data, "data/csv/sets.csv")   # N != 100 sectors
+#
 # SAM convention: rows receive payments from columns.
+# The SAM has 2N + 16 accounts for N = length(data.sets[:i]) sectors: N activities,
+# N commodities, 5 factors, 6 taxes, 4 institutions and 1 margin account.
+
+"""Read the model sets from a two-column `set,item` CSV (see `data/csv/sets.csv`).
+
+Call this *before* `default_sets!` (`prepare_data!(...; sets_path = ...)` does).  Every
+group the file supplies is **assigned** into `data.sets`, so the `get!` calls in
+`default_sets!` leave it alone; sets the file does not mention (`:r :v :l :h :f :t ...`)
+keep their defaults.  Only `:i` is mandatory:
+
+* `:j` and `:k` default to `:i`;
+* every item of a sector set must be a member of `:i`;
+* `ft` and `fd` must be disjoint from `e` — the `XAp[j,i]` columns are partitioned into
+  fertiliser/feed, energy and "other" blocks, so an overlap gives one variable two
+  equations and the model stops being square;
+* `:ag = cr union lv`, `:ip = i without ag` and `:nf = i without ag` are derived when
+  absent, and `:nnft = i without ft`, `:nnfd = i without fd` are always recomputed.
+"""
+function read_sets_csv!(data::LinkageData, path::AbstractString)
+    raw = readdlm(path, ',', String, '\n')
+    size(raw,1) >= 2 || error("Sets CSV must include a header row and at least one data row: $(path)")
+    size(raw,2) >= 2 || error("Sets CSV must have two columns `set,item`: $(path)")
+    header = lowercase.(strip.(String.(raw[1,1:2])))
+    header == ["set", "item"] || error("Sets CSV header must be `set,item`, found `$(join(header, ","))`: $(path)")
+
+    groups = Dict{Symbol,Vector{String}}()
+    for r in 2:size(raw,1)
+        g  = strip(String(raw[r,1]))
+        it = strip(String(raw[r,2]))
+        isempty(g) && isempty(it) && continue
+        (isempty(g) || isempty(it)) &&
+            error("Sets CSV row $(r) has an empty set name or item: $(path)")
+        push!(get!(groups, Symbol(g), String[]), String(it))
+    end
+
+    haskey(groups, :i) || error("Sets CSV must define set `i` (the activity/product list): $(path)")
+    allunique(groups[:i]) || error("Sets CSV: set `i` contains duplicate items: $(path)")
+
+    S = data.sets
+    for (g, items) in groups
+        S[g] = items
+    end
+    haskey(groups, :j) || (S[:j] = copy(groups[:i]))
+    haskey(groups, :k) || (S[:k] = copy(groups[:i]))
+
+    # Every sector set must be drawn from :i.
+    pool = Set(groups[:i])
+    for g in (:j, :k, :cr, :lv, :ag, :ip, :e, :ft, :fd, :nf, :nnft, :nnfd)
+        (haskey(groups, g) || g in (:j, :k)) || continue
+        bad = [x for x in S[g] if !(x in pool)]
+        isempty(bad) || error("Sets CSV: set `$(g)` contains items that are not in `i`: " *
+                              join(bad, ", ") * " ($(path))")
+    end
+
+    # Squareness: fertiliser and feed must not also be energy goods.
+    for (g, other) in ((:ft, :e), (:fd, :e))
+        (haskey(S, g) && haskey(S, other)) || continue
+        overlap = intersect(S[g], S[other])
+        isempty(overlap) || error("Sets CSV: `$(g)` and `$(other)` overlap in " *
+                                  join(overlap, ", ") *
+                                  "; the model needs them disjoint to stay square ($(path))")
+    end
+
+    if haskey(S, :cr) && haskey(S, :lv)
+        haskey(groups, :ag) || (S[:ag] = vcat(S[:cr], S[:lv]))
+    end
+    if haskey(S, :ag)
+        agset = Set(S[:ag])
+        haskey(groups, :ip) || (S[:ip] = [x for x in S[:i] if !(x in agset)])
+        haskey(groups, :nf) || (S[:nf] = [x for x in S[:i] if !(x in agset)])
+    end
+    haskey(S, :ft) && (S[:nnft] = [x for x in S[:i] if !(x in Set(S[:ft]))])
+    haskey(S, :fd) && (S[:nnfd] = [x for x in S[:i] if !(x in Set(S[:fd]))])
+    return data
+end
 
 function setup_sam_accounts!(data::LinkageData)
     default_sets!(data)
@@ -105,8 +182,9 @@ function build_default_large_sam!(data::LinkageData)
         M[_idx(data,"GOV"), ti] = sum(M[ti, :])
     end
     mrg = _idx(data,"TRD_MRG")
-    for p in products[81:100]
-        M[_idx(data,"COM_"*p), mrg] += sum(M[mrg,:]) / 20
+    mrg_products = products[max(1, end-19):end]      # == products[81:100] at N = 100
+    for p in mrg_products
+        M[_idx(data,"COM_"*p), mrg] += sum(M[mrg,:]) / length(mrg_products)
     end
 
     # Close household/government/investment/ROW roughly; RAS will tighten.
@@ -142,12 +220,32 @@ function build_default_large_sam!(data::LinkageData)
     return data
 end
 
+"""Error unless the account labels read from a SAM file are exactly the ones
+`setup_sam_accounts!` derived from `data.sets[:i]` (order is irrelevant — lookups go
+through `sam_index` — but a missing or stray label silently breaks calibration)."""
+function _assert_expected_sam_accounts(data::LinkageData, accounts::AbstractVector{<:AbstractString},
+                                       path::AbstractString)
+    expected = get(data.sam_accounts, :all, String[])
+    isempty(expected) && return nothing            # no account list to check against yet
+    got = Set(String.(accounts))
+    Set(expected) == got && return nothing
+    missing_acc = [a for a in expected if !(a in got)]
+    extra_acc   = [a for a in accounts if !(a in Set(expected))]
+    _show(v) = length(v) <= 10 ? join(v, ", ") : join(v[1:10], ", ") * ", ... ($(length(v)) total)"
+    error("SAM file `$(path)` does not carry the expected $(length(expected)) accounts for " *
+          "$(length(data.sets[:i])) sectors (2N+16).\n" *
+          "  missing from the file: " * (isempty(missing_acc) ? "none" : _show(missing_acc)) * "\n" *
+          "  not expected by the model: " * (isempty(extra_acc) ? "none" : _show(extra_acc)) * "\n" *
+          "Check that the file matches `data.sets[:i]` (see read_sets_csv! / sets_path).")
+end
+
 function read_sam_csv!(data::LinkageData, path::AbstractString)
     raw = readdlm(path, ',', Any, '\n')
     size(raw,1) >= 2 || error("CSV SAM must include header row and at least one data row.")
     col_accounts = strip.(string.(raw[1,2:end]))
     row_accounts = strip.(string.(raw[2:end,1]))
     row_accounts == col_accounts || error("SAM row and column accounts differ.")
+    _assert_expected_sam_accounts(data, row_accounts, path)
     mat = zeros(Float64, length(row_accounts), length(col_accounts))
     for r in 1:length(row_accounts), c in 1:length(col_accounts)
         x = raw[r+1,c+1]
@@ -168,7 +266,8 @@ function _excel_col(n::Int)
 end
 
 function read_sam_excel!(data::LinkageData, path::AbstractString; sheet::AbstractString="SAM")
-    # For the 100-sector package we know the default account dimension from setup_sam_accounts!.
+    # The account dimension (2N+16) comes from setup_sam_accounts!, i.e. from data.sets[:i];
+    # the read range adapts to it, so an N != 100 workbook needs no change here.
     setup_sam_accounts!(data)
     n = length(data.sam_accounts[:all])
     lastcol = _excel_col(n + 1)
@@ -177,6 +276,7 @@ function read_sam_excel!(data::LinkageData, path::AbstractString; sheet::Abstrac
     col_accounts = strip.(string.(raw[1,2:end]))
     row_accounts = strip.(string.(raw[2:end,1]))
     row_accounts == col_accounts || error("Excel SAM row and column accounts differ.")
+    _assert_expected_sam_accounts(data, row_accounts, path)
     mat = zeros(Float64, n, n)
     for r in 1:n, c in 1:n
         x = raw[r+1,c+1]

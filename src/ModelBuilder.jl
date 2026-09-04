@@ -1,6 +1,8 @@
 # Usage:
 #   data = init_data()
 #   prepare_data!(data)                         # default 100-sector SAM → balance → calibrate
+#   prepare_data!(data; sets_path="data/csv/sets.csv", source=:csv, sam_path="data/csv/sam.csv")
+#                                               # N-sector run: sets from file, then the SAM
 #   m = model(data)                             # creates Model(PATHSolver.Optimizer) and builds LINKAGE
 #   solve_model!(m)                             # calls optimize!(m)
 #
@@ -14,7 +16,13 @@
 """Prepare LINKAGE data for model construction.
 
 Keyword arguments:
-- `source = :default`: use internally generated 100-sector SAM.
+- `sets_path = nothing`: read the sets from a `set,item` CSV with `read_sets_csv!`
+  before any default is applied — this is how the model runs with N != 100 sectors.
+  The file must define `i` (activities = products) and, unless N == 100, also the
+  memberships `cr`, `lv`, `e`, `ft`, `fd` (with `ft`/`fd` disjoint from `e`); `ag`,
+  `ip`, `nf`, `nnft`, `nnfd` are derived, and anything the file omits (`r`, `v`, `l`,
+  ...) keeps its `default_sets!` value.  The SAM then needs 2N+16 accounts.
+- `source = :default`: use the internally generated N-sector SAM.
 - `source = :csv`: read SAM from `sam_path` using `read_sam_csv!`.
 - `source = :excel`: read SAM from `sam_path` using `read_sam_excel!`.
 - `balance = :ras`: apply RAS balancing. Use `balance = :none` to skip.
@@ -29,11 +37,13 @@ Keyword arguments:
 function prepare_data!(data::LinkageData=init_data();
         source::Symbol=:default,
         sam_path::Union{Nothing,String}=nothing,
+        sets_path::Union{Nothing,AbstractString}=nothing,
         balance::Symbol=:ras,
         calibrate::Bool=true,
         precompute::Bool=true,
         outdir::Union{Nothing,AbstractString}="results")
 
+    sets_path === nothing || read_sets_csv!(data, sets_path)
     default_sets!(data)
     setup_sam_accounts!(data)
 

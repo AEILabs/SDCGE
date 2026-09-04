@@ -1,8 +1,8 @@
 # LCGE-V4 — LINKAGE-style economy-wide policy simulation model
 
 LCGE-V4 is a Julia implementation of a LINKAGE-style computable general
-equilibrium (CGE) model: 100 sectors, 4 regions, two labour skills with
-rural–urban migration, old/new capital vintages, nested Armington/CET trade
+equilibrium (CGE) model: N sectors (100 by default), 4 regions, two labour
+skills with rural–urban migration, old/new capital vintages, nested Armington/CET trade
 with tariff-rate quotas, and a recursive-dynamic extension. It simulates how a
 policy change (a tariff, a productivity shock, labour growth, …) ripples
 through prices, production, employment, trade and household income.
@@ -19,7 +19,8 @@ The model is written as a square **mixed complementarity problem (MCP)** in
 ## Current status (2026-09-03)
 
 - The default synthetic economy prepares, balances and builds correctly:
-  216-account SAM, 48,099 variables = 48,099 complementarity constraints.
+  216-account SAM (2N+16 for N = 100 sectors), 48,099 variables = 48,099
+  complementarity constraints.
 - **The benchmark replicates**: every equation holds at the calibrated start
   values (max residual 9e-6), PATH reports `LOCALLY_SOLVED` after one major
   iteration (≈4 s) and all variables stay within 3e-4 % of their start
@@ -117,11 +118,11 @@ to the calibrated benchmark (≈ 0 for a benchmark run).
 
 ## Using your own SAM
 
-The economy is defined by a square Social Accounting Matrix with **216
-accounts** in the standard order (100 activities, 100 commodities, factors,
-taxes, institutions, margins); see `data/csv/sam_accounts.csv`. The SAM is
-RAS-balanced automatically and the balance report is written next to the
-results.
+The economy is defined by a square Social Accounting Matrix with **2N + 16
+accounts** for N sectors, in the standard order (N activities, N commodities,
+5 factors, 6 taxes, 4 institutions, 1 margin account) — 216 accounts for the
+default N = 100; see `data/csv/sam_accounts.csv`. The SAM is RAS-balanced
+automatically and the balance report is written next to the results.
 
 ```julia
 # CSV: first row / first column hold the account labels
@@ -132,6 +133,40 @@ data = prepare_data!(init_data(); source=:excel, sam_path="data/linkage_100secto
 
 m = model(data)
 ```
+
+### Using your own sectors (N ≠ 100)
+
+Pass `sets_path` to read the sector list and its groupings from a two-column
+`set,item` CSV (`data/csv/sets.csv` is the shipped 100-sector file):
+
+```julia
+data = prepare_data!(init_data(); sets_path="data/csv/sets.csv",
+                     source=:csv, sam_path="data/csv/sam.csv")
+```
+
+The file must define `i` (activities = products). Unless N = 100 it must also
+define the memberships `cr` (crops), `lv` (livestock), `e` (energy), `ft`
+(fertiliser) and `fd` (feed) — the built-in positional defaults (crops = first
+10, energy = 71:75, …) only make sense for `P001`–`P100`, and `default_sets!`
+now errors instead of silently applying them. Constraints:
+
+- every item of a sector set must be a member of `i`;
+- `ft ∩ e = ∅` and `fd ∩ e = ∅` (the `XAp` columns are partitioned into
+  fertiliser/feed, energy and "other" blocks; an overlap breaks squareness);
+- `|e| ≥ 1`, and `|ft| ≥ 1` whenever `|cr| ≥ 1`, `|fd| ≥ 1` whenever
+  `|lv| ≥ 1`, `|ag| ≥ 1`;
+- `ag = cr ∪ lv`, `ip = i ∖ ag`, `nf = i ∖ ag` are derived when the file omits
+  them, and `nnft = i ∖ ft`, `nnfd = i ∖ fd` are always recomputed.
+
+Sets the file does not mention (`r`, `v`, `l`, `h`, `f`, `t`, …) keep their
+defaults, so the file can also shrink the pseudo-regions to a single `R1`
+(`r,R1`) — the SAM has no regional dimension, the four regions only spread the
+national trade totals over 16 uniform `(r, rp)` cells, and `|r| = 1` builds
+square, replicates the benchmark and cuts the bilateral blocks by `|r|²`.
+
+The SAM must then carry exactly the 2N + 16 accounts derived from `i`
+(`ACT_<code>`, `COM_<code>`, …); `read_sam_csv!`/`read_sam_excel!` check the
+labels and name the mismatches.
 
 `examples/02_read_csv_sam.jl` and `03_read_excel_sam.jl` show the explicit
 step-by-step version (`read_sam_csv!` → `validate_sam!` → `balance_sam_ras!`
@@ -322,8 +357,14 @@ built-in courtesy licence is used.
 residual gaps in `results/sam_balance_table.csv` mean the input SAM is
 inconsistent.
 
-**`MethodError` when reading a SAM** — make sure the CSV/Excel file has
-exactly the 216 accounts listed in `data/csv/sam_accounts.csv`, in that order.
+**`SAM file ... does not carry the expected accounts`** — the file's account
+labels must be exactly the 2N + 16 the model derives from `data.sets[:i]`
+(the 216 in `data/csv/sam_accounts.csv` for the default sectors). The error
+lists what is missing and what is unexpected.
+
+**`default_sets!: with |S[:i]| = N != 100 ...`** — a non-default sector list
+needs the memberships `cr`, `lv`, `e`, `ft`, `fd`; supply them via
+`sets_path` (see "Using your own sectors").
 
 ---
 
@@ -360,8 +401,8 @@ SDCGE/  (branch main)
 
 | Feature | Detail |
 |---|---|
-| Sectors | 100 (crops P001–P010, livestock P011–P020, energy P071–P075, fertiliser P076–P078, other industry and services) |
-| Regions | 4 (`R1`–`R4`) with bilateral trade |
+| Sectors | N, from `data.sets[:i]`; 100 by default (crops P001–P010, livestock P011–P020, energy P071–P075, fertiliser P076–P078, other industry and services). Any other list comes from `sets_path` |
+| Regions | 4 (`R1`–`R4`) with bilateral trade; `|r| = 1` is supported |
 | Labour | Unskilled and skilled, rural/urban zones, migration |
 | Capital | Old (installed) and new (investment) vintages |
 | Trade | Nested Armington import demand, CET export supply, tariff-rate quotas |

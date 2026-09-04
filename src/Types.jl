@@ -1,7 +1,11 @@
 # Usage:
 #   data = init_data()
-#   default_sets!(data)              # loads 100 activities/products and SAM account groups
+#   default_sets!(data)              # loads N activities/products and SAM account groups
 #   setup_sam_accounts!(data)        # builds named SAM account lists
+#
+# N defaults to 100 (P001..P100).  For any other sector list, fill `data.sets[:i]`
+# and the memberships :cr :lv :e :ft :fd first (see `read_sets_csv!` in SAM.jl);
+# `default_sets!` uses `get!` throughout, so pre-populated sets always win.
 #
 # This file contains only data containers and set/account defaults.
 
@@ -29,13 +33,17 @@ end
 
 init_data() = LinkageData()
 
-"""Create 100-activity/100-product LINKAGE sets.
-Activities/products use P001..P100 so equations indexed by i,j,k remain compact.
+"""Fill in the LINKAGE sets that have not been supplied yet.
+
+`S[:i]` (activities = products) defaults to the 100 codes P001..P100; any other
+sector list must already be in `data.sets[:i]` — every `get!` below then leaves the
+caller's sets untouched.  The positional memberships (crops = first 10, livestock =
+next 10, energy = 71:75, fertiliser = 76:78) only make sense for that default list,
+so with `|S[:i]| != 100` the sets :cr :lv :e :ft :fd must be supplied explicitly.
 """
 function default_sets!(data::LinkageData)
     S = data.sets
-    products = ["P" * lpad(string(n), 3, "0") for n in 1:100]
-    get!(S, :i, products)
+    products = get!(S, :i, ["P" * lpad(string(n), 3, "0") for n in 1:100])
     get!(S, :j, S[:i])
     get!(S, :k, S[:i])
     get!(S, :r, ["R1", "R2", "R3", "R4"])
@@ -49,14 +57,23 @@ function default_sets!(data::LinkageData)
     get!(S, :in, ["HH", "Gov", "Inv"])
     get!(S, :t, [1, 2, 3])
 
-    get!(S, :cr, products[1:10])
-    get!(S, :lv, products[11:20])
+    n = length(products)
+    if n != 100 && !all(haskey(S, s) for s in (:cr, :lv, :e, :ft, :fd))
+        missing_sets = [s for s in (:cr, :lv, :e, :ft, :fd) if !haskey(S, s)]
+        error("default_sets!: with |S[:i]| = $(n) != 100 the sets " *
+              join(missing_sets, ", ") * " must be supplied (e.g. via " *
+              "read_sets_csv!); the positional defaults apply only to P001..P100.")
+    end
+    # Lazy `get!(f, dict, key)` so the positional slices are never evaluated when the
+    # caller supplied the set — `products[71:75]` would otherwise throw for N < 75.
+    get!(() -> products[1:10],  S, :cr)
+    get!(() -> products[11:20], S, :lv)
     get!(S, :ag, vcat(S[:cr], S[:lv]))
     get!(S, :ip, [x for x in S[:i] if !(x in S[:ag])])
-    get!(S, :e, products[71:75])
-    get!(S, :ft, products[76:78])
-    get!(S, :fd, products[1:10])
-    get!(S, :nf, products[21:100])
+    get!(() -> products[71:75], S, :e)
+    get!(() -> products[76:78], S, :ft)
+    get!(() -> products[1:10],  S, :fd)
+    get!(S, :nf, [x for x in S[:i] if !(x in S[:ag])])   # == products[21:100] at N = 100
     get!(S, :nnft, [x for x in S[:i] if !(x in S[:ft])])
     get!(S, :nnfd, [x for x in S[:i] if !(x in S[:fd])])
     get!(S, :gz, ["national", "urban", "rural"])
