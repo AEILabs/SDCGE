@@ -55,7 +55,8 @@ export LinkageData, init_data, default_sets!, setup_sam_accounts!, build_default
        diagnostic_equation_matches, diagnostic_variables_without_equations,
        diagnostic_variables_with_multiple_equations, diagnostic_redundant_equations,
        run_recursive_dynamic!, update_period_data!, plot_dynamic_results,
+       _collect_period_values, _period_summary,
        Scenario, write_policy_template, read_policy_scenarios, run_policy_experiments!,
-       plot_all_scenarios
+       run_scenario!, update_period_data_scenario!, plot_all_scenarios
 
 end

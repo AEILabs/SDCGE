@@ -320,7 +320,8 @@ period-`t_next` exogenous values.  This is the scenario-aware version of
 `update_period_data!`.
 """
 function update_period_data_scenario!(data::LinkageData, m, scen::Scenario, t_next::Int;
-        vintage_rule::Symbol=:benchmark_shares)
+        vintage_rule::Symbol=:benchmark_shares,
+        delta::Float64=scen.delta)
     PAR = data.metadata[:PAR]
     S   = data.sets
     i = S[:i]; l = S[:l]; v = S[:v]; gz = S[:gz]; ag = S[:ag]; h = S[:h]
@@ -328,7 +329,7 @@ function update_period_data_scenario!(data::LinkageData, m, scen::Scenario, t_ne
     # Capital accumulation: explicit stock in commodity units, converted back to
     # the rental units of KSupply/K0.  Shared with update_period_data!; see the
     # units note at the top of RecursiveDynamic.jl.
-    _update_capital_stock!(data, m; delta=scen.delta, vintage_rule=vintage_rule)
+    _update_capital_stock!(data, m; delta=delta, vintage_rule=vintage_rule)
 
     # Labor supply per skill: use scenario growth rates.
     for ll in l
@@ -381,6 +382,87 @@ function update_period_data_scenario!(data::LinkageData, m, scen::Scenario, t_ne
     return data
 end
 
+# ─── Single-scenario, in-memory runner ───────────────────────────────────────
+
+"""
+    run_scenario!(data, scen::Scenario; periods = scen.periods, delta = scen.delta,
+                  on_period = nothing, abort = Ref(false), period_modifier = nothing,
+                  vintage_rule = :benchmark_shares, show_solver_output = false,
+                  show_diagnostics = false, convergence_tolerance = 1.0e-8,
+                  time_limit = 3600, verbose = true)
+        -> (history, snapshots)
+
+Run ONE `Scenario` over `periods` periods against already-prepared `data`, entirely in
+memory: no Excel round trip, no workbook, no plots, nothing written to disk.  This is the
+loop body of [`run_policy_experiments!`](@ref) — which now calls it — exposed for callers
+that build a `Scenario` in Julia (a web backend, a batch driver, a test).
+
+`data` must already have been through `prepare_data!`; the scenario's period-1 `AT` levels
+are applied here, exactly as `run_policy_experiments!` did before every scenario.
+
+Hooks:
+- `period_modifier(t, data)` runs BEFORE period `t` is built, so a caller can edit
+  `parameters(data)` for levers the `Scenario` struct does not carry (tariffs `:tau_m`,
+  taxes `:tau_p`/`:kappa_h`, the government-spending share `:chi_gov`, …).  This is the
+  only supported way to give those levers a time path.
+- `on_period(t, status, elapsed, history_t)` runs after every period with the PATH
+  termination status as a `String`, the wall-clock seconds the build+solve took, and that
+  period's `_period_summary` named tuple.
+- `abort[]` is checked before each period; when it is `true` the loop stops and returns
+  the periods solved so far (possibly none).
+
+`delta` overrides the scenario's depreciation rate in the capital update; `periods`
+overrides its horizon.  Non-converged periods behave exactly as in the other drivers: the
+state is not propagated, so the trajectory plateaus instead of being corrupted.
+"""
+function run_scenario!(data::LinkageData, scen::Scenario;
+        periods::Int=scen.periods,
+        delta::Float64=scen.delta,
+        on_period=nothing,
+        abort::Ref{Bool}=Ref(false),
+        period_modifier=nothing,
+        vintage_rule::Symbol=:benchmark_shares,
+        show_solver_output::Bool=false,
+        show_diagnostics::Bool=false,
+        convergence_tolerance::Float64=1.0e-8,
+        time_limit::Real=3600,
+        verbose::Bool=true)
+
+    PAR = parameters(data)
+    # Initial AT (period 1) — apply the scenario's period-1 levels right away.
+    for ii in data.sets[:i]
+        PAR[:AT][ii] = get(scen.AT, (ii, 1), 1.0)
+    end
+
+    history   = Vector{NamedTuple}()
+    snapshots = Vector{Dict{Tuple{Symbol,Any},Float64}}()
+
+    for t in 1:periods
+        abort[] && break
+        period_modifier === nothing || period_modifier(t, data)
+        verbose && println("\n--- Scenario $(scen.name) — Period t = $(t) / $(periods) ---")
+        elapsed = @elapsed begin
+            m = model(data; show_solver_output=show_solver_output)
+            solve_model!(m; show_diagnostics=show_diagnostics,
+                         convergence_tolerance=convergence_tolerance,
+                         time_limit=time_limit)
+        end
+        push!(snapshots, _collect_period_values(m))
+        summary = _period_summary(m, data, t)
+        push!(history, summary)
+        if on_period !== nothing
+            status = try string(termination_status(m)) catch; "UNKNOWN" end
+            on_period(t, status, elapsed, summary)
+        end
+        if t < periods
+            update_period_data_scenario!(data, m, scen, t+1;
+                vintage_rule=vintage_rule, delta=delta)
+        end
+    end
+
+    return history, snapshots
+end
+
 # ─── Main scenario-runner ────────────────────────────────────────────────────
 
 """
@@ -411,25 +493,8 @@ function run_policy_experiments!(xlsx_path::AbstractString;
 
         data = init_data()
         prepare_data!(data)
-        # Initial AT (period 1) — apply scenario's period-1 levels right away.
-        PAR = data.metadata[:PAR]
-        for ii in data.sets[:i]
-            PAR[:AT][ii] = get(scen.AT, (ii, 1), 1.0)
-        end
-
-        history   = Vector{NamedTuple}()
-        snapshots = Vector{Dict{Tuple{Symbol,Any},Float64}}()
-
-        for t in 1:scen.periods
-            println("\n--- Scenario $(scen.name) — Period t = $(t) / $(scen.periods) ---")
-            m = model(data; show_solver_output=show_solver_output)
-            solve_model!(m; show_diagnostics=false)
-            push!(snapshots, _collect_period_values(m))
-            push!(history,   _period_summary(m, data, t))
-            if t < scen.periods
-                update_period_data_scenario!(data, m, scen, t+1)
-            end
-        end
+        history, snapshots = run_scenario!(data, scen;
+            show_solver_output=show_solver_output)
 
         results[scen.name] = (data, history, snapshots)
     end
