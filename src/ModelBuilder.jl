@@ -20,13 +20,19 @@ Keyword arguments:
 - `balance = :ras`: apply RAS balancing. Use `balance = :none` to skip.
 - `calibrate = true`: run `calibrate_from_sam!`.
 - `precompute = true`: store `data.metadata[:PAR] = precompute_parameters(data)`.
+- `outdir = "results"`: directory for the SAM balance report and the balanced SAM.
+  Pass `outdir = nothing` to skip those writes entirely — needed by embedding callers
+  (a web backend, a batch driver) that must not write into the process's working
+  directory, and by anything that calls `prepare_data!` concurrently, since the two
+  files would otherwise be overwritten by every call.
 """
 function prepare_data!(data::LinkageData=init_data();
         source::Symbol=:default,
         sam_path::Union{Nothing,String}=nothing,
         balance::Symbol=:ras,
         calibrate::Bool=true,
-        precompute::Bool=true)
+        precompute::Bool=true,
+        outdir::Union{Nothing,AbstractString}="results")
 
     default_sets!(data)
     setup_sam_accounts!(data)
@@ -61,9 +67,12 @@ function prepare_data!(data::LinkageData=init_data();
     # so downstream code cannot accidentally use the unbalanced raw SAM.
     assert_balanced_sam!(data; tol=1.0e-6)
 
-    # Write diagnostics and the balanced SAM for inspection/re-use.
-    export_sam_balance_report!(data; outdir="results")
-    export_balanced_sam!(data; path=joinpath("results", "balanced_sam.csv"))
+    # Write diagnostics and the balanced SAM for inspection/re-use (skipped when
+    # `outdir === nothing`).
+    if outdir !== nothing
+        export_sam_balance_report!(data; outdir=outdir)
+        export_balanced_sam!(data; path=joinpath(outdir, "balanced_sam.csv"))
+    end
 
     if calibrate
         calibrate_from_sam!(data)
