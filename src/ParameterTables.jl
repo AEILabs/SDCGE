@@ -257,7 +257,30 @@ function precompute_parameters(data::LinkageData)
     _fill!(PAR, :WTRinv_in, [(rr,inn) for rr in r for inn in ins], 0.0)
     _fill!(PAR, :WTRinv_out, [(rr,inn) for rr in r for inn in ins], 0.0)
     PAR[:chi_gov] = 0.2
+    PAR[:chi_inv] = 0.2
+    PAR[:FDInv0]  = 1.0
     _fill!(PAR, :Sfbar, r, 0.0)
+    # Trade closure (see the header of Calibration.jl and README "Closures"):
+    #   :bop      — small open economy.  World prices are exogenous in foreign
+    #               currency (PWE0/PWM0) and converted with the real exchange
+    #               rate ER; imports and exports are independent; the current
+    #               account is pinned by Sfbar (C-BOP).  Default.
+    #   :balanced — the legacy convention.  E-2 forces WTFd = lambda_w·WTFs, so
+    #               world-price imports equal world-price exports good by good
+    #               and Sfbar must be 0.
+    PAR[:trade_closure] = :bop
+    # Which variable clears the balance of payments (ignored under :balanced):
+    #   :flex_er  — Sfbar exogenous, the real exchange rate ER adjusts (default,
+    #               the standard LINKAGE closure).
+    #   :fixed_er — ER = ER0 fixed, foreign saving Sf of the home region adjusts.
+    PAR[:bop_closure] = :flex_er
+    # Investment under :bop: :fixed (exogenous real investment, C-INV) or :savings
+    # (C-9 kept, investment = savings; experimental, see README "Closures").
+    PAR[:inv_closure] = :fixed
+    PAR[:ER0] = 1.0
+    # World prices in foreign currency, one per (origin, destination, good).
+    _fill!(PAR, :PWE0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
+    _fill!(PAR, :PWM0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
     _fill!(PAR, :WTF0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
     _fill!(PAR, :WPE0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
     _fill!(PAR, :TR_region, r, 1.0)

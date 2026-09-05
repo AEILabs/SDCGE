@@ -456,8 +456,11 @@ function initialize_from_sam!(model, data::LinkageData)
     _safe_start_value_raw!(model, :GammaInv, (), 0.0)
     _safe_start_value_raw!(model, :Sg,  (), B[:Sg])
     _safe_start_value_raw!(model, :RSg, (), B[:Sg])
+    # Real exchange rate (only present under the :bop trade closure) and foreign
+    # saving.  Sfbar is 0 under :balanced, so this is the old `Sf = 0` there.
+    _safe_start_value!(model, :ER, (), get(B, :ER, get(PAR, :ER0, 1.0)))
     for rr in r
-        _safe_start_value_raw!(model, :Sf, (rr,), 0.0)
+        _safe_start_value_raw!(model, :Sf, (rr,), get(PAR[:Sfbar], rr, 0.0))
         _safe_start_value!(model, :GDP,  (rr,), B[:GDP])
         _safe_start_value!(model, :RGDP, (rr,), B[:GDP])
         _safe_start_value!(model, :CPI,  (rr,), 1.0)

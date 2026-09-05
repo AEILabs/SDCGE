@@ -138,12 +138,27 @@ function add_trade_equations!(model, data::LinkageData, PAR)
                   for rrp in rp) for rr in r))^(1/(1+PAR[:sigma_z2][ii]))) ⟂ PET[ii])
 
     # (T-20) FOB export price including export tax/subsidy.
-    @constraint(model, T_20[rr in r, rrp in rp, ii in i],
-        (WPE[rr,rrp,ii]) - ((1 + PAR[:tau_e][(rr,rrp,ii)]) * PE[rr,rrp,ii]) ⟂ WPE[rr,rrp,ii])
-
-    # (T-21) CIF import price with trade margin and iceberg cost.
-    @constraint(model, T_21[rr in r, rrp in rp, ii in i],
-        (WPM[rr,rrp,ii]) - ((1 + PAR[:zeta_t][(rr,rrp,ii)]) * WPE[rr,rrp,ii] / PAR[:lambda_w][(rr,rrp,ii)]) ⟂ WPM[rr,rrp,ii])
+    # (T-21) CIF import price with trade margin.
+    # Both depend on `PAR[:trade_closure]` (see Equilibrium.jl and the header of
+    # Calibration.jl); the equation counts are identical in the two regimes.
+    if Symbol(get(PAR, :trade_closure, :bop)) === :balanced
+        # E-2 pins PE, so T-20 determines the world price and T-21 derives the
+        # CIF price from it through the iceberg factor lambda_w — which is what
+        # ties imports to exports good by good.
+        @constraint(model, T_20[rr in r, rrp in rp, ii in i],
+            (WPE[rr,rrp,ii]) - ((1 + PAR[:tau_e][(rr,rrp,ii)]) * PE[rr,rrp,ii]) ⟂ WPE[rr,rrp,ii])
+        @constraint(model, T_21[rr in r, rrp in rp, ii in i],
+            (WPM[rr,rrp,ii]) - ((1 + PAR[:zeta_t][(rr,rrp,ii)]) * WPE[rr,rrp,ii] / PAR[:lambda_w][(rr,rrp,ii)]) ⟂ WPM[rr,rrp,ii])
+    else
+        # :bop — E-2 pins WPE = ER·PWE0, so T-20 determines the domestic export
+        # price PE net of the export tax, and the CIF import price is its own
+        # exogenous world price converted at ER (the margin wedge zeta_t is kept).
+        ER = model[:ER]
+        @constraint(model, T_20[rr in r, rrp in rp, ii in i],
+            (WPE[rr,rrp,ii]) - ((1 + PAR[:tau_e][(rr,rrp,ii)]) * PE[rr,rrp,ii]) ⟂ PE[rr,rrp,ii])
+        @constraint(model, T_21[rr in r, rrp in rp, ii in i],
+            (WPM[rr,rrp,ii]) - ((1 + PAR[:zeta_t][(rr,rrp,ii)]) * ER * PAR[:PWM0][(rr,rrp,ii)]) ⟂ WPM[rr,rrp,ii])
+    end
 
     # (T-22) Domestic import price including tariff and TRQ premium.
     @constraint(model, T_22[rr in r, rrp in rp, ii in i],

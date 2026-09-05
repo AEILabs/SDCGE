@@ -253,7 +253,7 @@ function export_results!(m, data::LinkageData; outdir::AbstractString="results")
         # Government, investment, foreign
         "YG", "Sg", "RSg", "TarY", "RTarY",
         "FD", "FDInv", "GOVDEM", "INVDEM", "InvSh",
-        "Sf",
+        "Sf", "ER",
         # Labor markets
         "LS", "UE", "MIGR", "PS",
         # Capital
@@ -283,6 +283,27 @@ function export_results!(m, data::LinkageData; outdir::AbstractString="results")
     )
 
     return df
+end
+
+"""Sum the product of two indexed JuMP variables over `idxset`.
+
+Returns `(solution_total, start_total)`, or `missing` if either container is
+absent (e.g. `ER` under `trade_closure = :balanced`).
+"""
+function _sum2(m, sym_a::Symbol, sym_b::Symbol, idxset)
+    (haskey(m, sym_a) && haskey(m, sym_b)) || return missing
+    total = 0.0; start = 0.0
+    try
+        for k in idxset
+            a  = _lcge_value(m[sym_a][k...]);       b  = _lcge_value(m[sym_b][k...])
+            sa = _lcge_start_value(m[sym_a][k...]); sb = _lcge_start_value(m[sym_b][k...])
+            (a isa Real && b isa Real)   && (total += float(a) * float(b))
+            (sa isa Real && sb isa Real) && (start += float(sa) * float(sb))
+        end
+        return (total, start)
+    catch
+        return missing
+    end
 end
 
 """Build a named summary of key macro / closure / factor-income indicators.
@@ -398,6 +419,34 @@ function _lcge_macro_summary_rows(m, data::LinkageData)
             tot = sav_h + (sg isa Real ? sg : 0.0) + sf
             ts  = sav_h_start + (sg_s isa Real ? sg_s : 0.0) + sf_s
             _push("SAVE", "Aggregate savings = HH + Gov + Foreign  (legacy SAVE)", tot, ts)
+        end
+    end
+
+    # ── Balance of payments ───────────────────────────────────────────────────
+    # World-price import and export values, their difference (the trade balance,
+    # positive = deficit) and the real exchange rate.  Under trade_closure = :bop
+    # C_BOP forces `MW_total - EW_total = Σ Sf`; under :balanced the two are equal
+    # good by good by construction.  `SI_gap` is the savings-investment residual
+    # of C-9, which is dropped under :bop and must come out at ~0 by Walras' law.
+    let rp_ = S[:rp]
+        mw = _sum2(m, :WPM, :WTFd, [(rrp,rr,ii) for ii in i, rr in r, rrp in rp_])
+        ew = _sum2(m, :WPE, :WTFs, [(rr,rrp,ii) for ii in i, rr in r, rrp in rp_])
+        if mw isa Tuple && ew isa Tuple
+            _push("MW_total", "Imports at world prices Σ WPM·WTFd",  mw[1], mw[2])
+            _push("EW_total", "Exports at world prices Σ WPE·WTFs",  ew[1], ew[2])
+            _push("TradeBalance", "World-price trade deficit Σ WPM·WTFd − Σ WPE·WTFs",
+                  mw[1]-ew[1], mw[2]-ew[2])
+        end
+    end
+    _push("ER", "Real exchange rate (C_BOP / C_ER; absent under :balanced)",                _v(:ER),         _vs(:ER))
+    let sav_h = sum((v for v in (_v(:SAV,(hh,)) for hh in h) if v isa Real); init=0.0),
+        dep_h = sum((v for v in (_v(:DeprY,(hh,)) for hh in h) if v isa Real); init=0.0),
+        sf    = sum((v for v in (_v(:Sf,(rr,)) for rr in r) if v isa Real); init=0.0),
+        sg    = _v(:Sg),
+        inv   = (haskey(m,:PFD) && haskey(m,:FD)) ? _v(:PFD,("Inv",))*_v(:FD,("Inv",)) : missing
+        if inv isa Real && sg isa Real
+            _push("SI_gap", "Savings-investment residual of C-9 (0 by Walras' law under :bop)",
+                  inv - (sav_h + dep_h + sg + sf), 0.0)
         end
     end
 

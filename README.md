@@ -289,21 +289,74 @@ equations need, are documented in the header of `Calibration.jl`:
   CES shares `α_j = s_j (P/P_j)^(1−σ)`, CET shares `β_j = s_j (P/P_j)^(1+σ)`
   from SAM value shares; all elasticities default to 0.5 (no elasticity data
   in the SAM); technical-change indices `λ = 1`.
-- **Balanced trade.** The trade block (E-2 with T-21) makes the CIF value of
-  imports of each good identically equal its FOB export value, and there is no
-  balance-of-payments equation, so a trade deficit cannot be represented. The
-  synthetic SAM has a 7,439 deficit at border prices. Exports are kept at
-  their SAM values, imports are set to `(1+tau_m)(1+tau_e)` × exports, and
-  household, government and investment demand are scaled down (≈12 %) so that
-  absorption equals output minus exports plus imports. Intermediate demand,
-  production and factor payments keep their SAM values. Consequently the
-  direct-tax rate is solved so that investment is financed (`kappa_h ≈ 0.24`),
-  household saving is ≈ 0 and government saving funds investment.
+- **Trade closure** (`prepare_data!(...; trade_closure = :bop | :balanced)`,
+  see the Closures section below). Under the default `:bop` the SAM's imports,
+  exports and final demand are used verbatim and the trade deficit becomes
+  exogenous foreign saving. Under `:balanced` (the legacy convention) the trade
+  block (E-2 with T-21) makes the CIF value of imports of each good identically
+  equal its FOB export value: exports are kept at their SAM values, imports are
+  set to `(1+tau_m)(1+tau_e)` × exports, and household, government and
+  investment demand are scaled down (≈12 % for the synthetic SAM, which has a
+  7,439 deficit at border prices) so that absorption equals output minus
+  exports plus imports. Intermediate demand, production and factor payments
+  keep their SAM values in both cases. The direct-tax rate is solved so that
+  investment is financed (`kappa_h`).
 - **Land is agricultural only** (the factor equations force zero land outside
   `S[:ag]`); land payments the synthetic SAM assigns to other sectors are
   reassigned to capital.
 - **Subsistence quantities `theta = 0`** (LES collapses to proportional
   budget shares); trade margins are zero at the benchmark (`zeta_t = 0`).
+
+---
+
+## Closures
+
+`parameters(data)[:trade_closure]` selects how the current account is closed
+(set it through `prepare_data!(...; trade_closure=, bop_closure=)`; the choice is
+stored in `data.par` and read by the equation files, so it must be made before
+calibration).
+
+- **`:bop`** (default) — small open economy with a balance-of-payments
+  equation. World prices are exogenous in foreign currency (`PWE0`, `PWM0`,
+  chosen so every benchmark price is 1) and converted with the real exchange
+  rate `ER` (E-2: `WPE = ER·PWE0`; T-21: `WPM = (1+zeta_t)·ER·PWM0`; T-20 then
+  gives the producer's export price `PE = WPE/(1+tau_e)`). Imports (T-9) and
+  exports (T-18) are independent, the SAM's own trade flows and final demand
+  are the benchmark (no rescale), and the trade deficit is booked as exogenous
+  foreign saving `Sfbar` (= CIF imports − FOB exports − export tax, the SAM's
+  `INV × ROW` net of `ROW × INV`). `C_BOP` (CIF imports − FOB exports = `Sf`)
+  is imposed and the savings–investment balance C-9 is dropped, since by
+  Walras' law it is the same restriction (`export_results!` reports its
+  residual as `SI_gap`). Investment is then pinned by `C_INV`
+  (`FD[Inv] = PAR[:FDInv0]`, an exogenous real level that
+  `update_period_data!` re-bases to `chi_inv·RGDP` between periods; a
+  share-of-GDP rule was tried and left the model's real scale nearly
+  unanchored under the fixed-wage labour closure). `bop_closure` picks what
+  clears the current account: `:flex_er` (default; `Sf = PNUM·ER·Sfbar`, `ER`
+  adjusts) or `:fixed_er` (`ER = ER0`, the home region's `Sf` adjusts).
+- **`:balanced`** — the legacy convention: E-2 `WTFd = lambda_w·WTFs` and
+  T-21 `WPM = WPE/lambda_w` tie the CIF value of imports to the FOB value of
+  exports good by good, `Sf = 0`, C-9 is imposed, and there is no `ER`
+  variable. The benchmark must be trade-balanced, which `calibrate_from_sam!`
+  enforces by rescaling final demand (Calibration conventions above). Kept so
+  that old results reproduce; the two regimes have identical equation counts.
+
+**Investment under `:bop`** (`inv_closure`). `:fixed` (default) is the `C_INV` rule
+above. `:savings` keeps C-9 instead (investment = household + government +
+foreign saving) and leaves `C_BOP` as the equation of `ER`; the system stays
+square and replicates its benchmark, but with `bop_closure = :flex_er` the real
+scale of the economy is weakly anchored (a uniform +10 pp tariff moved real GDP
+by −46 % on the synthetic SAM and −26 % for South Africa, against −2 % for
+Kenya), so use it only with `bop_closure = :fixed_er`, where it gives the
+Keynesian fixed-wage response (tariff revenue is saved and invested: real GDP
++0.4–0.6 %, investment +4–14 %). Under the default the same shock lowers real
+GDP by 6–11 % (Kenya, Benin, South Africa, synthetic SAM): the extra government
+saving is not invested and, with fixed wages, demand falls. The comparison is in
+`~/Documents/Data/CGE/validation/sdcge_branch_check/inv_closure_comparison.txt`.
+
+The data pipeline in `~/Documents/Data/CGE` ships each country with `sam.csv`
+(the real SAM, for `:bop`) and `sam_balanced_trade.csv` (pre-balanced good by
+good, for `:balanced`).
 
 ---
 
@@ -337,6 +390,10 @@ equations need, are documented in the header of `Calibration.jl`:
 - `AT` (productivity) enters P-1/P-2 as `AT·…` but P-3 as `…/AT`; the CES
   demand form should carry `AT^(σ−1)`. Harmless at the benchmark (`AT = 1`),
   but check before relying on TFP shocks quantitatively.
+- `solve_model!` uses PATH's default convergence tolerance (1e-6, absolute on the
+  residual norm). The earlier 1e-8 made PATH stop with `ITERATION_LIMIT`
+  ("cumulative minor iterlim met") or `SLOW_PROGRESS` on solutions it had
+  reached to 1e-8 relative, e.g. the second period of a zero-growth run.
 - Zero-valued variables sit at a 1e-8 safety bound, which leaves residual
   floors of ~1e-8 on ~180 equation families; harmless for PATH.
 

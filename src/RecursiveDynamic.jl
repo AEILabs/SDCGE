@@ -276,6 +276,19 @@ function update_period_data!(data::LinkageData, m;
         PAR[:FY0] *= (1 + g_nres)
     end
 
+    # ── 4b. EXOGENOUS REAL INVESTMENT (trade_closure = :bop) ─────────────────
+    # C-INV pins FD[Inv] to PAR[:FDInv0] inside a period (see Closure.jl for why
+    # a share-of-GDP rule cannot be used).  Re-base it on this period's real GDP
+    # so it still tracks a growing economy; with zero growth RGDP is unchanged
+    # and FDInv0 stays exactly at its benchmark value.  `PAR[:Sfbar]` is
+    # deliberately NOT grown: foreign saving is an exogenous level throughout.
+    if Symbol(get(PAR, :trade_closure, :bop)) !== :balanced
+        rgdp = try JuMP.value(m[:RGDP][first(S[:r])]) catch; nothing end
+        if rgdp isa Real && isfinite(rgdp) && rgdp > 0
+            PAR[:FDInv0] = get(PAR, :chi_inv, 0.2) * rgdp
+        end
+    end
+
     # ── 5. UPDATE AGGREGATE ANCHORS USED BY INITIALIZATION ────────────────────
     # KY0 and gamma_K are set by _update_capital_stock! above.
     # YH benchmark: factor incomes (assuming PF/W/R = 1 at next benchmark).

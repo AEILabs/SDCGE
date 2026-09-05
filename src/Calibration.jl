@@ -31,20 +31,40 @@
 #     so land payments of non-agricultural sectors in the SAM are re-assigned to
 #     capital (they are a factor payment either way).  TSupply, chi_T and gamma_T
 #     then live on S[:ag] only, consistently with F-13/F-14/F-15/F-16.
-# (2) BALANCED TRADE.  E-2 (WTFd = lambda_w · WTFs) together with T-21
-#     (WPM = WPE/lambda_w) makes the CIF value of imports identically equal to
-#     the FOB value of exports for every good, and the model has no
-#     balance-of-payments equation that could absorb a difference.  The benchmark
-#     is therefore made trade-balanced good by good:
+# (2) TRADE CLOSURE.  `par[:trade_closure]` selects one of two benchmarks.
+#
+#     :bop (default) -- balance-of-payments closure.  World prices are exogenous
+#     (small open economy): E-2 sets WPE = ER * PWE0 and T-21 sets
+#     WPM = (1+zeta_t) * ER * PWM0, with the real exchange rate ER = 1 at the
+#     benchmark.  Imports and exports are then independent, so the SAM's own
+#     trade flows are used verbatim:
+#         ES0  = COM_i x ROW      + COM_i x TRD_MRG        (exports + margin sales)
+#         XMT0 = ROW x COM_i + TAX_IMP x COM_i + TRD_MRG x COM_i
+#         XA0  = X - ES0 + XMT0
+#     Because a balanced SAM satisfies the commodity identity
+#     X + imports + tariff + margin = intermediate + C + G + I + exports + margin
+#     sales, XA0 - (intermediate use of i) is *exactly* the SAM's C+G+I, so final
+#     demand is taken from the SAM without any rescale.  The residual trade
+#     deficit is booked as exogenous foreign saving
+#         Sfbar = sum_i XMT0/(1+tau_m) - sum_i (1+tau_e) ES0
+#     (= CIF imports + import margin - FOB exports - margin sales - export tax,
+#      i.e. the SAM's INV x ROW net of ROW x INV), which enters C-7 and, through
+#     it, the savings-investment identity.  PWE0 = 1+tau_e and PWM0 = 1/(1+tau_m)
+#     keep every benchmark price at 1 (PE = PET = PP = PM = PMT = PA = 1).
+#
+#     :balanced -- the legacy convention, kept so old results reproduce.  E-2
+#     (WTFd = lambda_w * WTFs) together with T-21 (WPM = WPE/lambda_w) makes the
+#     CIF value of imports identically equal to the FOB value of exports for
+#     every good.  The benchmark is therefore made trade-balanced good by good:
 #         ES  = SAM exports (+ margin sales),
-#         XMT = (1+tau_m)(1+tau_e) · ES   (imports at domestic prices),
+#         XMT = (1+tau_m)(1+tau_e) * ES   (imports at domestic prices),
 #         lambda_w = (1+tau_m)(1+tau_e)   (units of imports per unit exported).
 #     Domestic absorption then has to equal output plus the trade-tax wedge,
 #     XA = XP - ES + XMT, so household/government/investment demand is scaled to
 #     that level (intermediate demand and all production flows stay exactly at
 #     their SAM values).  With the shipped synthetic SAM this scales final demand
 #     down by about 12%: that SAM runs a trade deficit financed by a capital
-#     inflow, which this model cannot represent.
+#     inflow, which the balanced-trade convention cannot represent.
 # (3) SUBSISTENCE = 0.  The ELES subsistence quantities theta_k,h are set to 0
 #     (the SAM carries no information on them), so D-1/D-2 reduce to
 #     XH_k = mu_c_k · YC and mu_c is calibrated from benchmark consumption.
@@ -77,6 +97,23 @@ function calibrate_from_sam!(data::LinkageData)
 
     hh_col = idx["HH"]; gov_col = idx["GOV"]; inv_col = idx["INV"]; row_col = idx["ROW"]
     mrg_col = idx["TRD_MRG"]
+
+    # Trade closure (convention (2) in the header).  Set it before calibrating,
+    # e.g. `prepare_data!(data; trade_closure = :balanced)` or
+    # `data.par[:trade_closure] = :balanced`; it is written back into `par` so
+    # `precompute_parameters` hands the same choice to the equation files.
+    trade_closure = Symbol(get(par, :trade_closure, :bop))
+    trade_closure in (:bop, :balanced) ||
+        error("Unknown trade_closure: $(trade_closure). Use :bop or :balanced.")
+    bop_closure = Symbol(get(par, :bop_closure, :flex_er))
+    bop_closure in (:flex_er, :fixed_er) ||
+        error("Unknown bop_closure: $(bop_closure). Use :flex_er or :fixed_er.")
+    inv_closure = Symbol(get(par, :inv_closure, :fixed))
+    inv_closure in (:fixed, :savings) ||
+        error("Unknown inv_closure: $(inv_closure). Use :fixed or :savings.")
+    par[:trade_closure] = trade_closure
+    par[:bop_closure]   = bop_closure
+    par[:inv_closure]   = inv_closure
 
     # ── 1. Raw SAM flows ────────────────────────────────────────────────────
     IOc  = Dict{Any,Float64}()                       # IOc[(good, sector)]
@@ -139,35 +176,71 @@ function calibrate_from_sam!(data::LinkageData)
     # Margin services sold to the international transport pool count as exports;
     # the margin embodied in each commodity's imports counts as an import (the
     # GTAP convention).  XMgr is 0 at the benchmark because zeta_t = 0 (T-23).
+    #
+    # A good with no exports (or no imports) keeps a share of EPS/X ~ 1e-12
+    # rather than an exact 0: T-16 contains beta_es^(-1/sigma_z) and beta_xd^(-1/sigma_z),
+    # which are Inf at 0 while the CET quantity is only bounded at 1e-8, so an
+    # exact zero share would put Inf * 0 = NaN into the primal aggregator.  The
+    # floored share contributes beta_es * XP^((1+s)/s) to T-16, i.e. ~1e-12 of the
+    # domestic term, and leaves the good non-traded for every practical purpose.
     ES0  = Dict(p => max(expv[p] + mrgb[p], EPS) for p in i)
     tau_m_s = Dict(p => tarv[p] / max(impv[p] + mrgi[p], EPS) for p in i)
     tau_e   = max(M[idx["TAX_EXP"], row_col], 0.0) / max(sum(values(ES0)), EPS)
-    lam_w   = Dict(p => (1 + tau_m_s[p]) * (1 + tau_e) for p in i)
-    XMT0 = Dict(p => lam_w[p] * ES0[p] for p in i)
+    if trade_closure === :balanced
+        lam_w = Dict(p => (1 + tau_m_s[p]) * (1 + tau_e) for p in i)
+        XMT0  = Dict(p => lam_w[p] * ES0[p] for p in i)
+    else
+        # :bop -- imports are the SAM's own imports at domestic prices; the
+        # iceberg factor is retired (E-2/T-21 no longer use it).
+        lam_w = Dict(p => 1.0 for p in i)
+        XMT0  = Dict(p => max(impv[p] + tarv[p] + mrgi[p], EPS) for p in i)
+    end
     XA0  = Dict(p => X[p] - ES0[p] + XMT0[p] for p in i)
     XDd0 = Dict(p => XA0[p] - XMT0[p] for p in i)     # = XDs0 = X - ES0  (E-1)
 
-    # ── 5. Final demand scaled to the balanced-trade absorption level ───────
+    # ── 5. Final demand ─────────────────────────────────────────────────────
+    # :balanced scales C/G/I to the balanced-trade absorption level; :bop takes
+    # the SAM's own levels, which the commodity identity of a balanced SAM makes
+    # exactly consistent with XA0 - (intermediate use).
     iorow = Dict(p => sum(IOc[(p,jj)] for jj in i) for p in i)   # uses of good p
     c_sam = Dict(p => max(M[idx["COM_"*p], hh_col],  0.0) for p in i)
     g_sam = Dict(p => max(M[idx["COM_"*p], gov_col], 0.0) for p in i)
     i_sam = Dict(p => max(M[idx["COM_"*p], inv_col], 0.0) for p in i)
     C0 = Dict{String,Float64}(); G0 = Dict{String,Float64}(); I0 = Dict{String,Float64}()
-    n_short = 0
-    for p in i
-        fdtot = XA0[p] - iorow[p]
-        base  = c_sam[p] + g_sam[p] + i_sam[p]
-        if fdtot <= EPS || base <= EPS
-            n_short += 1
-            fdtot = max(fdtot, EPS)
-            C0[p] = fdtot; G0[p] = EPS; I0[p] = EPS
-        else
-            C0[p] = fdtot * c_sam[p] / base
-            G0[p] = fdtot * g_sam[p] / base
-            I0[p] = fdtot * i_sam[p] / base
+    if trade_closure === :balanced
+        n_short = 0
+        for p in i
+            fdtot = XA0[p] - iorow[p]
+            base  = c_sam[p] + g_sam[p] + i_sam[p]
+            if fdtot <= EPS || base <= EPS
+                n_short += 1
+                fdtot = max(fdtot, EPS)
+                C0[p] = fdtot; G0[p] = EPS; I0[p] = EPS
+            else
+                C0[p] = fdtot * c_sam[p] / base
+                G0[p] = fdtot * g_sam[p] / base
+                I0[p] = fdtot * i_sam[p] / base
+            end
+        end
+        n_short > 0 && @warn "Benchmark absorption below intermediate demand for $n_short good(s); final demand floored there."
+    else
+        for p in i
+            C0[p] = c_sam[p]; G0[p] = g_sam[p]; I0[p] = i_sam[p]
+        end
+        # Consistency check: with a balanced SAM, XA0 - intermediate use is the
+        # SAM's own C+G+I good by good.  A gap means the commodity accounts of the
+        # SAM do not balance, and the benchmark will not satisfy T-1/E-1.
+        gap, gp = 0.0, first(i)
+        for p in i
+            g = abs(XA0[p] - iorow[p] - (c_sam[p] + g_sam[p] + i_sam[p]))
+            g > gap && (gap = g; gp = p)
+        end
+        if gap > 1.0e-6 * max(sum(values(X)), 1.0)
+            @warn "trade_closure = :bop: the SAM's commodity account does not balance; " *
+                  "absorption gap $(gap) on good $(gp).  Balance the SAM (balance = :ras) " *
+                  "or the benchmark will not replicate."
         end
     end
-    n_short > 0 && @warn "Benchmark absorption below intermediate demand for $n_short good(s); final demand floored there."
 
     HH0     = max(sum(values(C0)), EPS)
     GOV0    = max(sum(values(G0)), EPS)
@@ -194,10 +267,18 @@ function calibrate_from_sam!(data::LinkageData)
     # 0 and it contributes nothing.
     Tother = sum(values(txo)) + sum(values(txi)) + TarY0 + ExpTax0
 
+    # Benchmark foreign saving.  Under :bop it is the SAM's trade deficit valued
+    # exactly as C-BOP values it (WPM = 1/(1+tau_m), WPE = 1+tau_e at ER = 1), so
+    # the benchmark satisfies the balance-of-payments identity to machine
+    # precision.  Under :balanced trade is balanced good by good and Sf = 0.
+    Sf0 = trade_closure === :balanced ? 0.0 :
+          sum(XMT0[p] / (1 + tau_m_s[p]) for p in i) - sum((1 + tau_e) * ES0[p] for p in i)
+
     # Closure: D-3 gives SAV = YC - HH0, Y-8 gives YC = YD - SAV,
     # Y-7 gives YD = (1-kappa)·YH0, C-4 gives Sg = YG - GOV0 and C-9 requires
-    # FD[Inv] = INVEST0.  Eliminating YC, YD, Sg and YG leaves
-    SAV0 = FactorInc + Tother - INVEST0 - HH0 - GOV0
+    # FD[Inv] = INVEST0 with foreign saving Sf0 on the financing side.
+    # Eliminating YC, YD, Sg and YG leaves
+    SAV0 = FactorInc + Tother + Sf0 - INVEST0 - HH0 - GOV0
     if SAV0 <= 0.0
         @warn "Benchmark household saving is non-positive ($SAV0); flooring at 1e-6."
         SAV0 = 1.0e-6
@@ -418,6 +499,25 @@ function calibrate_from_sam!(data::LinkageData)
         par[:a_f][(p,"Inv")] = I0[p]/INVEST0
     end
     par[:chi_gov] = GOV0/max(GDP0,EPS)
+    # C-INV (only imposed under :bop): exogenous real investment, plus the share
+    # of real GDP that `update_period_data!` re-bases it on between periods.
+    par[:FDInv0]  = INVEST0
+    par[:chi_inv] = INVEST0/max(GDP0,EPS)
+
+    # ── Balance of payments ─────────────────────────────────────────────────
+    # World prices in foreign currency (ER = 1 at the benchmark), chosen so every
+    # domestic benchmark price is 1: WPE = ER·PWE0 = 1+tau_e gives PE = 1 (T-20),
+    # WPM = (1+zeta_t)·ER·PWM0 = 1/(1+tau_m) gives PM = 1 (T-22).
+    par[:ER0]  = 1.0
+    par[:PWE0] = Dict{Any,Float64}((rr,rrp,p) => 1.0 + tau_e
+                                    for rr in r for rrp in rp for p in i)
+    par[:PWM0] = Dict{Any,Float64}((rr,rrp,p) => 1.0/(1 + tau_m_s[p])
+                                    for rr in r for rrp in rp for p in i)
+    # Exogenous foreign saving: the whole current account is booked on the first
+    # (home) region, the only one the SAM describes.
+    let rr0 = first(r)
+        par[:Sfbar] = Dict{Any,Float64}(rr => (rr == rr0 ? Sf0 : 0.0) for rr in r)
+    end
 
     # Macro anchors used elsewhere (RecursiveDynamic, PolicyScenarios, reports).
     par[:TY0]=TY0; par[:FY0]=FY0; par[:KY0]=KY0; par[:LY0]=LY0
@@ -462,7 +562,9 @@ function calibrate_from_sam!(data::LinkageData)
     B[:TLnd]=tot_land
     B[:kappa]=kappa; B[:tau_e]=tau_e
     B[:WPE]=Dict(p => 1.0 + tau_e for p in i)
-    B[:WPM]=Dict(p => (1.0 + tau_e)/lam_w[p] for p in i)
+    B[:WPM]=Dict(p => trade_closure === :balanced ? (1.0 + tau_e)/lam_w[p] :
+                      1.0/(1.0 + tau_m_s[p]) for p in i)
+    B[:ER]=1.0; B[:Sf]=Sf0
     par[:bench] = B
 
     return data

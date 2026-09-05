@@ -22,6 +22,15 @@ Keyword arguments:
   memberships `cr`, `lv`, `e`, `ft`, `fd` (with `ft`/`fd` disjoint from `e`); `ag`,
   `ip`, `nf`, `nnft`, `nnfd` are derived, and anything the file omits (`r`, `v`, `l`,
   ...) keeps its `default_sets!` value.  The SAM then needs 2N+16 accounts.
+- `trade_closure = :bop`: balance-of-payments closure — exogenous world prices, a
+  real exchange rate `ER`, and the SAM's own imports, exports and final demand.
+  `:balanced` restores the legacy convention (imports = `(1+tau_m)(1+tau_e)`·exports
+  good by good, final demand rescaled to that absorption level).
+- `bop_closure = :flex_er`: under `:bop`, foreign saving is exogenous and `ER`
+  clears the current account. `:fixed_er` pins `ER = PAR[:ER0]` and lets the home
+  region's foreign saving `Sf` adjust instead.
+- `inv_closure = :fixed`: under `:bop`, real investment is exogenous (`C_INV`).
+  `:savings` keeps C-9 instead (investment = domestic + foreign saving; experimental).
 - `source = :default`: use the internally generated N-sector SAM.
 - `source = :csv`: read SAM from `sam_path` using `read_sam_csv!`.
 - `source = :excel`: read SAM from `sam_path` using `read_sam_excel!`.
@@ -38,11 +47,17 @@ function prepare_data!(data::LinkageData=init_data();
         source::Symbol=:default,
         sam_path::Union{Nothing,String}=nothing,
         sets_path::Union{Nothing,AbstractString}=nothing,
+        trade_closure::Symbol=:bop,
+        bop_closure::Symbol=:flex_er,
+        inv_closure::Symbol=:fixed,
         balance::Symbol=:ras,
         calibrate::Bool=true,
         precompute::Bool=true,
         outdir::Union{Nothing,AbstractString}="results")
 
+    data.par[:trade_closure] = trade_closure
+    data.par[:bop_closure]   = bop_closure
+    data.par[:inv_closure]   = inv_closure
     sets_path === nothing || read_sets_csv!(data, sets_path)
     default_sets!(data)
     setup_sam_accounts!(data)
@@ -250,7 +265,10 @@ solve_model!(m; output="verbose")
 """
 function solve_model!(m;
         solver::Symbol=:PATH,
-        convergence_tolerance::Float64=1.0e-8,
+        # PATH's own default (1e-6).  1e-8 was used until 2026-09-05; at the model's scale
+        # (SAM totals 1e4-1e5) it made PATH report ITERATION_LIMIT ("cumulative minor
+        # iterlim met") or SLOW_PROGRESS on solutions it had already reached to 1e-8 relative.
+        convergence_tolerance::Float64=1.0e-6,
         output::Union{Nothing,AbstractString}=nothing,
         time_limit::Real=3600,
         show_diagnostics::Bool=true)
@@ -307,6 +325,10 @@ end
 """Full one-call pipeline: prepare data, build model, solve, and return `(model, data)`."""
 function run_linkage!(; source::Symbol=:default,
         sam_path::Union{Nothing,String}=nothing,
+        sets_path::Union{Nothing,AbstractString}=nothing,
+        trade_closure::Symbol=:bop,
+        bop_closure::Symbol=:flex_er,
+        inv_closure::Symbol=:fixed,
         balance::Symbol=:ras,
         optimizer=nothing,
         optimizer_attributes=Dict{String,Any}("tol" => 1.0e-6),
@@ -317,7 +339,8 @@ function run_linkage!(; source::Symbol=:default,
         show_solver_output::Bool=true,
         path_output::AbstractString="yes")
 
-    data = prepare_data!(init_data(); source=source, sam_path=sam_path, balance=balance)
+    data = prepare_data!(init_data(); source=source, sam_path=sam_path, sets_path=sets_path,
+        trade_closure=trade_closure, bop_closure=bop_closure, inv_closure=inv_closure, balance=balance)
     m = model(data; optimizer=optimizer,
         optimizer_attributes=optimizer_attributes,
         show_solver_output=show_solver_output)

@@ -69,6 +69,42 @@ using DataFrames
     println("variables = $nv, constraints = $nc")
     @test nv == nc
 
+    # Trade closure.  The default :bop keeps the SAM's own imports, exports and
+    # final demand (no rescale), books the trade deficit as exogenous foreign
+    # saving and adds the real exchange rate ER; :balanced is the legacy
+    # convention (imports = (1+tau_m)(1+tau_e) * exports good by good, final
+    # demand rescaled, no ER).  Both must stay square.
+    db = prepare_data!(init_data(); outdir=nothing, trade_closure=:balanced)
+    @test data.par[:trade_closure] == :bop && db.par[:trade_closure] == :balanced
+    @test haskey(m, :ER) && !haskey(model(db; show_solver_output=false), :ER)
+    mb = model(db; show_solver_output=false)
+    @test num_variables(mb) == num_constraints(mb; count_variable_in_set_constraints=false)
+    @test all(v == 0.0 for v in values(db.par[:Sfbar]))
+    let M = data.balanced_sam, idx = data.sam_index, iset = data.sets[:i]
+        hh_sam = sum(max(M[idx["COM_"*p], idx["HH"]], 0.0) for p in iset)
+        @test isapprox(data.par[:bench][:HH], hh_sam; rtol=1e-10)      # :bop: no final-demand rescale
+        @test db.par[:bench][:HH] != data.par[:bench][:HH]              # :balanced rescales it
+        # CIF imports (incl. margins on imports) - exports - margin sales - export tax
+        deficit = sum(M[idx["ROW"], idx["COM_"*p]] + M[idx["TRD_MRG"], idx["COM_"*p]] -
+                      M[idx["COM_"*p], idx["ROW"]] - M[idx["COM_"*p], idx["TRD_MRG"]] for p in iset) -
+                  M[idx["TAX_EXP"], idx["ROW"]]
+        @test isapprox(sum(values(data.par[:Sfbar])), deficit; rtol=1e-8)
+    end
+    @test_throws ErrorException prepare_data!(init_data(); outdir=nothing, trade_closure=:foo)
+    # :fixed_er swaps the complementary variable of the balance of payments.
+    df_ = prepare_data!(init_data(); outdir=nothing, bop_closure=:fixed_er)
+    mf = model(df_; show_solver_output=false)
+    @test haskey(mf, :C_ER) && num_variables(mf) == num_constraints(mf; count_variable_in_set_constraints=false)
+
+    # A real country SAM (Kenya, EMERGING/GTAP hybrid, 65 goods) with its own
+    # trade deficit: loads, calibrates without a final-demand rescale and builds square.
+    ken_sam  = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sam.csv")
+    ken_sets = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sets.csv")
+    dk = prepare_data!(init_data(); sets_path=ken_sets, source=:csv, sam_path=ken_sam, balance=:none, outdir=nothing)
+    @test sum(values(dk.par[:Sfbar])) > 0                                # Kenya runs a trade deficit
+    mk = model(dk; show_solver_output=false)
+    @test num_variables(mk) == num_constraints(mk; count_variable_in_set_constraints=false)
+
     df = results_dataframe(m)
     @test nrow(df) == nv
     @test !any(occursin("CartesianIndex", string(x)) for x in df.index)
@@ -83,6 +119,15 @@ using DataFrames
         solve_model!(m; output="no", show_diagnostics=false)
         println("termination_status = ", termination_status(m))
         @test termination_status(m) in (MOI.LOCALLY_SOLVED, MOI.OPTIMAL)
+        @test abs(value(m[:ER]) - 1) < 1e-6                              # ER = 1 at the benchmark
+
+        # Both closures and the Kenya SAM replicate their benchmarks (the real SAM to
+        # 0.5 %: its calibrated start point has a 1e-3 residual in P-5).
+        for (mm, dd_, tol) in ((mb, db, 1e-4), (mf, df_, 1e-4), (mk, dk, 5e-3))
+            solve_model!(mm; output="no", show_diagnostics=false)
+            @test termination_status(mm) in (MOI.LOCALLY_SOLVED, MOI.OPTIMAL)
+            @test maximum(abs(value(mm[:XP][p]) / dd_.par[:bench][:XP][p] - 1) for p in dd_.sets[:i]) < tol
+        end
 
         # Recursive dynamics with zero growth must reproduce the benchmark every
         # period: the capital stock is stationary when I = delta*K, which only

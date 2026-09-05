@@ -48,16 +48,85 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # (C-6) Government expenditure volume as share of real GDP at market prices.
     @constraint(model, C_6, (FD[gov]) - (PAR[:chi_gov] * GDPMPr) ⟂ FD[gov])
 
-    # (C-7) Foreign saving value at world numeraire price.
-    @constraint(model, C_7[rr in r], (Sf[rr]) - (PNUM * PAR[:Sfbar][rr]) ⟂ Sf[rr])
+    # ── C-7 / C-9 / C-BOP: the macro closure ─────────────────────────────────
+    # Walras' law makes exactly one of {savings-investment balance, balance of
+    # payments, government balance} redundant: summing the household, government
+    # and investment budgets with goods-market clearing (E-1) and the Armington /
+    # CET duality identities gives
+    #     Σ WPM·WTFd − Σ WPE·WTFs  =  PFD[Inv]·FD[Inv] − (Σ SAV + Σ DeprY + Sg)
+    # identically.  C-9 and C-BOP are therefore the same restriction, and only one
+    # of them may be imposed.
+    #
+    #   :balanced — E-2 forces world-price trade balance, Sf = PNUM·Sfbar (= 0),
+    #               and C-9 is the imposed balance (savings-driven investment).
+    #               No BoP equation; nothing changes from the original model.
+    #
+    #   :bop      — C-BOP is imposed and C-9 is dropped (it holds by Walras' law
+    #               and is reported by `export_results!` as a diagnostic).
+    #               Investment then needs its own rule, C-INV, which mirrors C-6
+    #               for government: a fixed volume share of real GDP.
+    #               `PAR[:bop_closure]` picks what clears the current account:
+    #                 :flex_er  — Sf = PNUM·ER·Sfbar for every region and C-BOP ⟂ ER
+    #                             (foreign saving exogenous in foreign-currency
+    #                             terms, real exchange rate adjusts).
+    #                 :fixed_er — ER = ER0 and C-BOP ⟂ Sf[rr0] (the home region's
+    #                             current account is endogenous).
+    if Symbol(get(PAR, :trade_closure, :bop)) === :balanced
+        # (C-7) Foreign saving value at world numeraire price.
+        @constraint(model, C_7[rr in r], (Sf[rr]) - (PNUM * PAR[:Sfbar][rr]) ⟂ Sf[rr])
 
-    # C-8 REMOVED: all Sf[rr] are already pinned by C_7 (exogenous foreign saving per region).
-    # C_8 used Sf[first(r)] as its ⟂ variable, duplicating C_7 for that region.
+        # C-8 REMOVED: all Sf[rr] are already pinned by C_7 (exogenous foreign saving per region).
+        # C_8 used Sf[first(r)] as its ⟂ variable, duplicating C_7 for that region.
 
-    # (C-9) Savings-investment balance; one region normally dropped by Walras law.
-    @constraint(model, C_9, (PFD[inv]*FD[inv]) - (sum(SAV[hh] + DeprY[hh] for hh in h) + Sg + Sf[rr0]
-        + PNUM*sum(PAR[:WTRinv_in][(rrp,inn)] for rrp in rp for inn in ins)
-        - PNUM*sum(PAR[:WTRinv_out][(rrp,inn)] for rrp in rp for inn in ins)) ⟂ FD[inv])
+        # (C-9) Savings-investment balance; one region normally dropped by Walras law.
+        @constraint(model, C_9, (PFD[inv]*FD[inv]) - (sum(SAV[hh] + DeprY[hh] for hh in h) + Sg + Sf[rr0]
+            + PNUM*sum(PAR[:WTRinv_in][(rrp,inn)] for rrp in rp for inn in ins)
+            - PNUM*sum(PAR[:WTRinv_out][(rrp,inn)] for rrp in rp for inn in ins)) ⟂ FD[inv])
+    else
+        ER = model[:ER]
+        flex_er = Symbol(get(PAR, :bop_closure, :flex_er)) === :flex_er
+
+        # (C-7) Domestic-currency value of exogenous (real) foreign saving.
+        # Under :fixed_er the home region is skipped: C-BOP determines Sf[rr0].
+        @constraint(model, C_7[rr in r; flex_er || rr != rr0],
+            (Sf[rr]) - (PNUM * ER * PAR[:Sfbar][rr]) ⟂ Sf[rr])
+
+        # (C-BOP) Balance of payments of the home region, in world prices:
+        # CIF import value minus FOB export value equals foreign saving.
+        bop_gap = @expression(model,
+            sum(WPM[rrp,rr,ii] * WTFd[rrp,rr,ii] for ii in i for rr in r for rrp in rp)
+            - sum(WPE[rr,rrp,ii] * WTFs[rr,rrp,ii] for ii in i for rr in r for rrp in rp)
+            - Sf[rr0])
+        if flex_er
+            @constraint(model, C_BOP, (bop_gap) - (0.0) ⟂ ER)
+        else
+            @constraint(model, C_BOP, (bop_gap) - (0.0) ⟂ Sf[rr0])
+            # (C-ER) Fixed real exchange rate.
+            @constraint(model, C_ER, (ER) - (PAR[:ER0]) ⟂ ER)
+        end
+
+        # (C-9, inv_closure = :savings) Savings-driven investment: C-9 is kept and
+        # determines FD[Inv]; C_BOP above is then implied by Walras' law but is kept
+        # as the equation of ER (an experiment: see README "Closures").
+        if Symbol(get(PAR, :inv_closure, :fixed)) === :savings
+            @constraint(model, C_9, (PFD[inv]*FD[inv]) - (sum(SAV[hh] + DeprY[hh] for hh in h) + Sg + Sf[rr0]
+                + PNUM*sum(PAR[:WTRinv_in][(rrp,inn)] for rrp in rp for inn in ins)
+                - PNUM*sum(PAR[:WTRinv_out][(rrp,inn)] for rrp in rp for inn in ins)) ⟂ FD[inv])
+        else
+        # (C-INV) Exogenous real investment, replacing C-9 (see the Walras note).
+        # It must be an exogenous LEVEL, not a share of real GDP: `chi_inv·GDPMPr`
+        # is homogeneous of degree one in quantities, and with C-6 doing the same
+        # for government it leaves the model's real scale almost unanchored — the
+        # capital market is perfectly elastic under :fixed_wage (F-25) and labour
+        # is not binding, so only land and natural resources pin the level.  With
+        # the share form a uniform +10 pp tariff on the shipped SAM moved real GDP
+        # by -49 % and the response was not monotone in the shock; with the level
+        # form it is -5.8 % and monotone.  `PAR[:FDInv0]` is calibrated to the
+        # SAM's investment and re-based to `chi_inv · RGDP` between periods by
+        # `update_period_data!`, so it still tracks a growing economy.
+        @constraint(model, C_INV, (FD[inv]) - (PAR[:FDInv0]) ⟂ FD[inv])
+        end
+    end
 
     # (C-10) Investment share of GDP at market prices.
     @constraint(model, C_10, (InvSh) - (PFD[inv] * FD[inv] / GDPMPr) ⟂ InvSh)

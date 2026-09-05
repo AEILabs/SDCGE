@@ -191,6 +191,13 @@ function add_variables!(model, data::LinkageData)
         KNorm      >= 0
     end)
 
+    # Real exchange rate: only exists under the balance-of-payments closure.
+    # Under :balanced the trade block carries no world-price variable, and
+    # declaring ER would leave it without an equation (the model must stay square).
+    if Symbol(get(parameters(data), :trade_closure, :bop)) !== :balanced
+        @variable(model, ER >= 0)
+    end
+
     initialize_from_sam!(model, data)
     return model
 end
