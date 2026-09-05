@@ -36,7 +36,8 @@ using DataFrames
     @test d3.par[:bench][:kappa] == d4.par[:bench][:kappa]
 
     # N != 100: 12 GTAP-coded sectors with the memberships supplied explicitly
-    # (as read_sets_csv! supplies them).  |e| = 3, |ft| = 1, |fd| = 2.
+    # (as read_sets_csv! supplies them).  |e| = 3, |ft| = 1, |fd| = 2, and a
+    # single region — the other end of the |r| range the trade block must handle.
     d5 = init_data()
     d5.sets[:i]  = ["pdr","wht","gro","ctl","oap","coa","oil","ely","chm","tex","trd","osg"]
     d5.sets[:cr] = ["pdr","wht","gro"]
@@ -44,12 +45,18 @@ using DataFrames
     d5.sets[:e]  = ["coa","oil","ely"]
     d5.sets[:ft] = ["chm"]
     d5.sets[:fd] = ["wht","gro"]
+    d5.sets[:r]  = ["R1"]
     prepare_data!(d5; outdir=nothing)
     @test length(d5.sam_accounts[:all]) == 2 * 12 + 16
     @test d5.sets[:ag] == vcat(d5.sets[:cr], d5.sets[:lv])
     @test d5.sets[:ip] == d5.sets[:nf] == ["coa","oil","ely","chm","tex","trd","osg"]
+    @test d5.sets[:rp] == ["R1"]          # rp follows r, so |r| = 1 stays square
     m12 = model(d5; show_solver_output=false)
     @test num_variables(m12) == num_constraints(m12; count_variable_in_set_constraints=false)
+
+    # A SAM whose labels are not the 2N+16 the sets imply must be rejected by the
+    # reader (naming the mismatches), not deep inside calibrate_from_sam!.
+    @test_throws ErrorException read_sam_csv!(d5, sam_csv)
 
     # A non-default sector list without :cr/:lv/:e/:ft/:fd must fail loudly:
     # the positional defaults would otherwise be disjoint from :i.

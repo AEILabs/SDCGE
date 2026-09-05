@@ -9,7 +9,7 @@ should live — every loader below takes a path argument, so location is the cal
 short, non-prescriptive "possible sources" section at the end suggests what national accounts,
 input-output and GTAP data *could* supply; it is not part of the format contract.
 
-All citations are `file:line` against branch `eps-integration` of this repo as checked out.
+All citations are `file:line` against branch `n-sector-sets` of this repo as checked out.
 
 ---
 
@@ -84,6 +84,35 @@ Two loaders, both invoked through `prepare_data!(data; source=..., sam_path=...)
 
 A third keyword, `sets_path`, reads the sector list and its groupings from a two-column
 `set,item` CSV *before* any of this (`read_sets_csv!`); it is what makes N ≠ 100 possible (§4).
+The file needs the exact header row `set,item` and one row per (set, item) pair; item order
+inside a set is preserved, and the order of `i` fixes the order of the `ACT_`/`COM_` accounts
+(§2.2). `data/csv/sets.csv` is the shipped 100-sector example.
+
+| Set | Meaning | Required | If the file omits it |
+|---|---|---|---|
+| `i` | the N activity/product codes (activity `i` produces commodity `i`); items must be unique | **yes** | error |
+| `j`, `k` | equation-index aliases of `i` | no | copied from `i` |
+| `cr` | crops — get the crop production nest (land + fertiliser) | yes unless N = 100 | positional default `i[1:10]`; error if N ≠ 100 |
+| `lv` | livestock — get the livestock nest (feed + land) | yes unless N = 100 | positional default `i[11:20]`; error if N ≠ 100 |
+| `e` | energy goods — the energy bundle inside every sector's intermediate nest | yes unless N = 100 | positional default `i[71:75]`; error if N ≠ 100 |
+| `ft` | fertiliser goods — the crop nest's fertiliser input | yes unless N = 100 | positional default `i[76:78]`; error if N ≠ 100 |
+| `fd` | feed goods — the livestock nest's feed input | yes unless N = 100 | positional default `i[1:10]`; error if N ≠ 100 |
+| `ag` | agriculture — the only sectors that keep their `LAND` payments; land outside `ag` is silently moved to capital (`Calibration.jl:94-100`) | no | `cr ∪ lv` |
+| `ip` | non-agricultural ("industry") sectors — `F_PT_nonag`/`F_NPT_nonag`/`F_Td_nonag`/`F_Ts_nonag` fix their land and natural-resource blocks (`Factors.jl:268-272,422`), and policy scenario 8 shocks them | no | `i ∖ ag` |
+| `nf` | non-farm sectors (destructured in `Production.jl`/`Other.jl`; no current equation indexes it) | no | `i ∖ ag` |
+| `nnft`, `nnfd` | complements `i ∖ ft`, `i ∖ fd` | no | **always** recomputed, even if supplied |
+| `r` | regions; `rp` follows `r` | no | `R1`–`R4`; a single line `r,R1` gives `\|r\| = 1`, which builds square and replicates the benchmark |
+
+Any other set (`v`, `l`, `ul`, `sl`, `h`, `f`, `in`, `t`, `gz`, `gs`) is left to `default_sets!`
+and should stay at its default: the calibrator writes `LY0`/`LV0` under the literal skill names
+`UnSkLab`/`SkLab` (`Calibration.jl:182-183,367-368`), `a_f`/`XAf0` under `Gov`/`Inv`
+(`Calibration.jl:417-418,431`), the household is the SAM's single `HH` account
+(`Calibration.jl:78`) and P-5 reads the `Old` vintage by name (`Production.jl:32`).
+
+`read_sets_csv!` validates that every item of `j k cr lv ag ip e ft fd nf nnft nnfd` is a member
+of `i`, and that `ft ∩ e = ∅` and `fd ∩ e = ∅` (§4); `default_sets!` then errors if `|i| ≠ 100`
+and any of `cr lv e ft fd` is still missing, rather than applying the positional defaults to a
+sector list they do not describe.
 
 Both readers require `row_accounts == col_accounts` exactly, i.e. the same 2N+16 labels in the
 same order on both axes, and both hand off to `set_sam!`
