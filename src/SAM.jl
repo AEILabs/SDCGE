@@ -49,6 +49,11 @@ function read_sets_csv!(data::LinkageData, path::AbstractString)
     for (g, items) in groups
         S[g] = items
     end
+    # The file is the explicit statement of the memberships: a set it does not mention
+    # is empty (an economy without livestock or fertiliser production), not "unknown".
+    for g in (:cr, :lv, :e, :ft, :fd)
+        haskey(groups, g) || (S[g] = String[])
+    end
     haskey(groups, :j) || (S[:j] = copy(groups[:i]))
     haskey(groups, :k) || (S[:k] = copy(groups[:i]))
 

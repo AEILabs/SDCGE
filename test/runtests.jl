@@ -54,6 +54,16 @@ using DataFrames
     m12 = model(d5; show_solver_output=false)
     @test num_variables(m12) == num_constraints(m12; count_variable_in_set_constraints=false)
 
+    # An economy without livestock (or fertiliser) production: the set is empty, the
+    # model still builds square (ag = cr).
+    d5b = init_data()
+    d5b.sets[:i]  = d5.sets[:i]; d5b.sets[:cr] = d5.sets[:cr]; d5b.sets[:lv] = String[]
+    d5b.sets[:e]  = d5.sets[:e]; d5b.sets[:ft] = String[]; d5b.sets[:fd] = d5.sets[:fd]; d5b.sets[:r] = ["R1"]
+    prepare_data!(d5b; outdir=nothing)
+    @test d5b.sets[:ag] == d5b.sets[:cr]
+    m12b = model(d5b; show_solver_output=false)
+    @test num_variables(m12b) == num_constraints(m12b; count_variable_in_set_constraints=false)
+
     # A SAM whose labels are not the 2N+16 the sets imply must be rejected by the
     # reader (naming the mismatches), not deep inside calibrate_from_sam!.
     @test_throws ErrorException read_sam_csv!(d5, sam_csv)

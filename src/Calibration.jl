@@ -158,10 +158,11 @@ function calibrate_from_sam!(data::LinkageData)
     in_ndset(jj, ii) = ii in crset ? !(jj in ftset || jj in eset) :
                        ii in lvset ? !(jj in fdset || jj in eset) :
                                      !(jj in eset)
-    ndq   = Dict(p => sum(IOc[(jj,p)] for jj in i if in_ndset(jj,p)) for p in i)
-    enrgq = Dict(p => sum(IOc[(jj,p)] for jj in S[:e]) for p in i)
-    fertq = Dict(p => (p in crset ? sum(IOc[(jj,p)] for jj in S[:ft]) : 0.0) for p in i)
-    feedq = Dict(p => (p in lvset ? sum(IOc[(jj,p)] for jj in S[:fd]) : 0.0) for p in i)
+    # (init = 0.0: a set may be empty, e.g. no fertiliser or feed commodity in the economy)
+    ndq   = Dict(p => sum((IOc[(jj,p)] for jj in i if in_ndset(jj,p)); init=0.0) for p in i)
+    enrgq = Dict(p => sum((IOc[(jj,p)] for jj in S[:e]); init=0.0) for p in i)
+    fertq = Dict(p => (p in crset ? sum((IOc[(jj,p)] for jj in S[:ft]); init=0.0) : 0.0) for p in i)
+    feedq = Dict(p => (p in lvset ? sum((IOc[(jj,p)] for jj in S[:fd]); init=0.0) : 0.0) for p in i)
 
     ndval = Dict(p => PNDv[p] * ndq[p] for p in i)                 # PND · ND
     vaval = Dict(p => max((X[p] - txo[p]) - ndval[p], EPS) for p in i)  # PVA · VA
