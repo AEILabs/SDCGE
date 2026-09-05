@@ -393,7 +393,7 @@ end
     run_scenario!(data, scen::Scenario; periods = scen.periods, delta = scen.delta,
                   on_period = nothing, abort = Ref(false), period_modifier = nothing,
                   vintage_rule = :benchmark_shares, show_solver_output = false,
-                  show_diagnostics = false, convergence_tolerance = 1.0e-8,
+                  show_diagnostics = false, convergence_tolerance = 1.0e-6,
                   time_limit = 3600, verbose = true)
         -> (history, snapshots)
 
@@ -429,7 +429,7 @@ function run_scenario!(data::LinkageData, scen::Scenario;
         vintage_rule::Symbol=:benchmark_shares,
         show_solver_output::Bool=false,
         show_diagnostics::Bool=false,
-        convergence_tolerance::Float64=1.0e-8,
+        convergence_tolerance::Float64=1.0e-6,
         time_limit::Real=3600,
         verbose::Bool=true)
 
