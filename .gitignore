@@ -2,3 +2,6 @@
 results/
 reports/
 CLAUDE.local.md
+# databases exported by the Data/CGE pipeline (github.com/AEILabs/CGE-SAMs): regenerate with R/09_export_sdcge.R
+data/*_20??_*/
+data/registry.csv
