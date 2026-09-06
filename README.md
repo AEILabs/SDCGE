@@ -16,28 +16,38 @@ The model is written as a square **mixed complementarity problem (MCP)** in
 
 ---
 
-## Current status (2026-09-03)
+## Current status (2026-09-05)
 
 - The default synthetic economy prepares, balances and builds correctly:
-  216-account SAM (2N+16 for N = 100 sectors), 48,099 variables = 48,099
-  complementarity constraints.
+  216-account SAM (2N+16 for N = 100 sectors), 48,100 variables = 48,100
+  complementarity constraints (the extra one is the real exchange rate `ER`).
+- **Any number of sectors** from a `sets.csv` file, and a single region
+  (`|r| = 1`), see "Using your own sectors" below.
+- **Balance-of-payments trade closure** (`trade_closure = :bop`, default): the
+  SAM's own imports, exports and final demand are the benchmark, the trade
+  deficit is exogenous foreign saving and the real exchange rate clears the
+  current account; `:balanced` keeps the legacy per-good trade balance. See
+  "Closures".
+- **Real country databases**: 300 African SAMs (GTAP Africa V3 2017 and
+  EMERGING/GTAP hybrids 2018, 65 or up to 133 sectors, labour-share variants)
+  built by the pipeline in `~/Documents/Data/CGE`
+  ([AEILabs/CGE-SAMs](https://github.com/AEILabs/CGE-SAMs)) under
+  `data/<ISO3>_<year>_<family>/` (git-ignored, regenerate with its
+  `R/09_export_sdcge.R`; `data/registry.csv` lists them). Every one loads,
+  balances and calibrates without rescaling; PATH solves 267, reproduces the
+  benchmark within 1 % for 239 and a 2-period zero-growth run succeeds for
+  252 (misses: tiny 133-sector activities and three inconsistent
+  government accounts).
 - **The benchmark replicates**: every equation holds at the calibrated start
-  values (max residual 9e-6), PATH reports `LOCALLY_SOLVED` after one major
-  iteration (≈4 s) and all variables stay within 3e-4 % of their start
-  values.
-- A 20 % import tariff on one bilateral flow (`examples` / README below)
-  solves in ≈1 s with textbook incidence: the taxed import flow falls 1.9 %,
-  its tariff-inclusive price rises 3.8 %, the exporter's FOB price falls
-  3.7 %, competing sources are barely affected, real GDP falls by 1e-4 %.
+  values, PATH reports `LOCALLY_SOLVED` after one major iteration (≈4 s).
 - Recursive dynamics keep an explicit capital stock (`Kstock0 = I0/δ`,
   `K_{t+1} = (1−δ)K_t + I_t`, rental supply `KSupply = κ·K`). With zero
-  growth every period reproduces the benchmark (max change 8e-8); with TFP
-  growth alone each period solves. **Runs with labour growth still fail in
-  most periods** because of the labour closure — see "Known limitations".
-- Always check `termination_status(m)` after `solve_model!`. Now that the
-  benchmark converges, an `ITERATION_LIMIT` after a shock means the shock is
-  too large for a single step — apply it in smaller increments, re-solving
-  from the previous solution.
+  growth every period reproduces the benchmark; with TFP growth alone each
+  period solves. **Runs with labour growth still fail in most periods**
+  because of the labour closure — see "Known limitations".
+- Always check `termination_status(m)` after `solve_model!`. An
+  `ITERATION_LIMIT` after a shock means the shock is too large for a single
+  step — apply it in smaller increments, re-solving from the previous solution.
 
 ---
 
@@ -153,8 +163,9 @@ now errors instead of silently applying them. Constraints:
 - every item of a sector set must be a member of `i`;
 - `ft ∩ e = ∅` and `fd ∩ e = ∅` (the `XAp` columns are partitioned into
   fertiliser/feed, energy and "other" blocks; an overlap breaks squareness);
-- `|e| ≥ 1`, and `|ft| ≥ 1` whenever `|cr| ≥ 1`, `|fd| ≥ 1` whenever
-  `|lv| ≥ 1`, `|ag| ≥ 1`;
+- `|e| ≥ 1`; `lv`, `ft` and `fd` may be empty (an economy without livestock
+  or fertiliser production — the bundle price then stays at 1), and a set the
+  file does not mention is empty;
 - `ag = cr ∪ lv`, `ip = i ∖ ag`, `nf = i ∖ ag` are derived when the file omits
   them, and `nnft = i ∖ ft`, `nnfd = i ∖ fd` are always recomputed.
 
@@ -170,9 +181,10 @@ labels and name the mismatches.
 
 `examples/02_read_csv_sam.jl` and `03_read_excel_sam.jl` show the explicit
 step-by-step version (`read_sam_csv!` → `validate_sam!` → `balance_sam_ras!`
-→ `calibrate_from_sam!`). Read "Calibration conventions" below before using
-a real SAM: the model cannot represent a trade deficit, and the calibration
-adjusts final demand to close it.
+→ `calibrate_from_sam!`). Read "Calibration conventions" and "Closures" below before using
+a real SAM: under the default `:bop` closure the SAM's trade deficit becomes
+exogenous foreign saving and final demand is used as is; under `:balanced`
+the calibration rescales final demand to close it.
 
 ---
 
@@ -446,9 +458,10 @@ SDCGE/  (branch main)
 │   ├── Diagnostics.jl      diagnose_model, print_equation_diagnostics
 │   ├── RecursiveDynamic.jl run_recursive_dynamic!
 │   └── PolicyScenarios.jl  write_policy_template, run_policy_experiments!
-├── data/                   synthetic SAM (CSV + Excel), policy_experiments.xlsx template
+├── data/                   synthetic SAM (CSV + Excel), policy_experiments.xlsx template;
+│                           country databases <ISO3>_<year>_<family>/ (git-ignored, from AEILabs/CGE-SAMs)
 ├── examples/               numbered walkthrough scripts (start here)
-├── test/runtests.jl        smoke test
+├── test/runtests.jl        smoke test (+ test/data: a real Kenya SAM fixture)
 └── results/                generated output (git-ignored)
 ```
 
