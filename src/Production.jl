@@ -20,10 +20,26 @@ function add_production_equations!(model, data::LinkageData, PAR)
     lv_nd = [x for x in nnfd if !(x in e)]
     ip_nd = [x for x in i    if !(x in e)]
 
+    # ── Hicks-neutral productivity AT in the top nest (fixed 2026-09-14) ──────
+    # XP = AT·F(ND,VA) with F a CES aggregator, so total cost is XP/AT·c(PND,PVA)
+    # and the unit cost is UVC = c/AT — which is what P-3 already imposes.  The
+    # conditional demands must be Shephard's lemma applied to *that* dual:
+    #     ND = ∂(XP·c/AT)/∂PND = (XP/AT)·α_nd·(c/PND)^σ,
+    # and substituting the model's own c = AT·UVC gives
+    #     ND = XP·α_nd·AT^(σ−1)·(UVC/PND)^σ,          likewise for VA.
+    # P-1/P-2 carried AT^1, which is the σ = 2 special case and inconsistent with
+    # P-3 everywhere else: it made input value PND·ND + Σ_v PVA·VA equal
+    # XP·AT^(2−σ)·UVC instead of XP·UVC, so the cost identity behind P-4/P-6
+    # broke as soon as AT ≠ 1, and with the calibrated σ = 0.5 a productivity
+    # *gain* raised intermediate use per unit output (wrong sign).  At AT = 1 the
+    # factor is 1, so the benchmark and every AT = 1 result are untouched.
+    # Convention: σ_p is indexed by (activity, vintage), so in P-1 — whose CES
+    # demand is summed over vintages — the AT^(σ_p−1) factor sits INSIDE the sum
+    # with its own vintage's σ_p; it cannot be hoisted out as a scalar.
     # (P-1) Aggregate intermediate demand by vintage top nest
-    @constraint(model, P_1[ii in i], (ND[ii]) - (PAR[:AT][ii] * sum(PAR[:alpha_nd][(ii,vv)] * XPv[ii,vv] * (UVCv[ii,vv] / PND[ii])^(PAR[:sigma_p][(ii,vv)]) for vv in v)) ⟂ ND[ii])
+    @constraint(model, P_1[ii in i], (ND[ii]) - (sum(PAR[:AT][ii]^(PAR[:sigma_p][(ii,vv)] - 1) * PAR[:alpha_nd][(ii,vv)] * XPv[ii,vv] * (UVCv[ii,vv] / PND[ii])^(PAR[:sigma_p][(ii,vv)]) for vv in v)) ⟂ ND[ii])
     # (P-2) Value added demand by vintage top nest
-    @constraint(model, P_2[ii in i, vv in v], (VA[ii,vv]) - (PAR[:AT][ii] * PAR[:alpha_va][(ii,vv)] * XPv[ii,vv] * (UVCv[ii,vv] / PVA[ii,vv])^(PAR[:sigma_p][(ii,vv)])) ⟂ VA[ii,vv])
+    @constraint(model, P_2[ii in i, vv in v], (VA[ii,vv]) - (PAR[:AT][ii]^(PAR[:sigma_p][(ii,vv)] - 1) * PAR[:alpha_va][(ii,vv)] * XPv[ii,vv] * (UVCv[ii,vv] / PVA[ii,vv])^(PAR[:sigma_p][(ii,vv)])) ⟂ VA[ii,vv])
     # (P-3) Unit variable cost by vintage
     @constraint(model, P_3[ii in i, vv in v], (UVCv[ii,vv]) - ((PAR[:alpha_nd][(ii,vv)]*PND[ii]^(1-PAR[:sigma_p][(ii,vv)]) + PAR[:alpha_va][(ii,vv)]*PVA[ii,vv]^(1-PAR[:sigma_p][(ii,vv)]))^(1/(1-PAR[:sigma_p][(ii,vv)])) / PAR[:AT][ii]) ⟂ UVCv[ii,vv])
     # (P-4) Aggregate unit variable cost
