@@ -271,6 +271,16 @@ function solve_model!(m;
         convergence_tolerance::Float64=1.0e-6,
         output::Union{Nothing,AbstractString}=nothing,
         time_limit::Real=3600,
+        # PATH's own default cumulative (minor/pivotal) iteration limit is 10 000,
+        # which is SMALLER than this model's variable count (16 199 at 65 sectors,
+        # 48 099 at 100).  A Lemke path needs O(n) pivots, so on the default PATH
+        # cannot finish even one major iteration and reports ITERATION_LIMIT
+        # ("cumulative minor iterlim met") with the start point barely moved —
+        # measured on data/ZMB_2017_gtap11afr and data/CPV_2018_hybrid under
+        # :full_employment, where a +10 % TFP shock returned ITERATION_LIMIT and
+        # dXP = +0.04 % on the default and LOCALLY_SOLVED with dXP = +5.7 %/+20.3 %
+        # once the limit was raised.  Scale it with the model instead.
+        cumulative_iteration_limit::Integer=max(100_000, 20 * num_variables(m)),
         show_diagnostics::Bool=true)
 
     check_initialization!(m; error_on_bad=true)
@@ -291,6 +301,10 @@ function solve_model!(m;
         set_optimizer_attribute(m, "time_limit", time_limit)
     catch
     end
+    try
+        set_optimizer_attribute(m, "cumulative_iteration_limit", Int(cumulative_iteration_limit))
+    catch
+    end
 
     if show_diagnostics
         print_model_diagnostics(m)
@@ -298,6 +312,7 @@ function solve_model!(m;
         println("  output                = ", path_output)
         println("  convergence_tolerance = ", convergence_tolerance)
         println("  time_limit            = ", time_limit)
+        println("  cumulative_iteration_limit = ", cumulative_iteration_limit)
         println("\nStarting PATH solve...\n")
     end
 

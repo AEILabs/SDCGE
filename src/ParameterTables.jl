@@ -149,17 +149,29 @@ function precompute_parameters(data::LinkageData)
     # Labour-market closure (see the header of Factors.jl):
     #   :fixed_wage      — W = 1 and UE absorbs supply minus demand   (default)
     #   :full_employment — the wage TW clears sum_i LV = LS·(1-UE0)
-    # :full_employment is implemented and square but does NOT converge yet
-    # (PATH: SLOW_PROGRESS after ~440 major iterations of backtracking steps,
-    # benchmark drift ~0.005-0.009 %); :fixed_wage stays the default because it
-    # replicates the benchmark and solves in ~1 s.  See the Factors.jl header
-    # and the hand-over notes for the remaining diagnosis.
+    # :full_employment is square, replicates the benchmark (0.0004 % on
+    # data/KEN_2017_gtap11afr) and, unlike the default, turns a +10 % TFP shock
+    # into higher output rather than higher unemployment.  It is still NOT the
+    # default because long TFP paths lose their last periods: PABS acts as the
+    # shifter of the land/natural-resource supply schedules instead of a price
+    # level, so land is effectively in perfectly elastic supply and PABS drifts
+    # to ~1e-3 as productivity cumulates.  See the "KNOWN REMAINING DEFECT"
+    # section of the Factors.jl header.
     PAR[:labour_closure] = :fixed_wage
     # Numeraire under :full_employment (ignored under :fixed_wage, where W = 1):
-    #   :pabs — PABS = 1 (default; benchmark drift 0.004 %)
-    #   :cpi  — CPI[first(r)] = 1, PABS endogenous   (benchmark drift 0.60 %)
-    # Both give the same start residual; :pabs is the more stable of the two.
-    PAR[:numeraire] = :pabs
+    #   :cpi  — CPI[first(r)] = 1 ⟂ PABS (default).  CPI is the mean of the PC
+    #           bundle prices, so this genuinely pins the absolute price level.
+    #   :pabs — PABS = 1.  **This is NOT a numeraire.**  PABS appears only as the
+    #           deflator of the land/natural-resource supply schedules F-13/F-18
+    #           and in F_PS/F-9, never in a price-forming equation, so fixing it
+    #           fixes the units of PABS and nothing else: the model stays
+    #           homogeneous of degree one in every nominal price.  Measured on
+    #           data/KEN_2017_gtap11afr with AT = 1.10, the :pabs solution is the
+    #           :cpi solution multiplied by lambda = 18.7 (CPI 18.70 vs 1.00,
+    #           PABS 1.00 vs 0.0535, PTLnd/PABS and TLnd identical to 5 digits) —
+    #           an exactly singular direction that PATH cannot resolve.  Kept
+    #           only for reproducing the pre-2026-09-14 runs.
+    PAR[:numeraire] = :cpi
     _fill!(PAR, :UE0, l, 0.0)          # benchmark unemployment rate per skill
     _fill!(PAR, :chi_migr, l, 0.0)
     _fill!(PAR, :omega_migr, l, 0.5)

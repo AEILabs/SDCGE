@@ -70,6 +70,27 @@
 #     XH_k = mu_c_k · YC and mu_c is calibrated from benchmark consumption.
 #     The direct-tax rate kappa_h is then the one remaining free parameter and is
 #     solved for so that C-9 delivers exactly the benchmark investment level.
+# (4) ZERO FACTOR ENDOWMENTS (2026-09-14).  `par[:chi_F][p] = max(nrs[p], 1e-9)`
+#     and `par[:FSupply]` likewise floor the sector-specific ("natural resource")
+#     factor at 1e-9 so that the CES formulas never divide by zero.  That floor is
+#     a numerical device, NOT an endowment: a sector with no natural-resource row
+#     in the SAM has alpha_ff = 0 on the demand side as well, so both Fs and Fd
+#     are identically zero and PF[p] is a free variable.  Under
+#     PAR[:labour_closure] = :full_employment `Factors.jl` therefore routes every
+#     sector with chi_F <= LCGE_FACTOR_ZERO = 1e-6 to the fixed-real-price branch
+#     of F-18/F-19 (PF = PABS·PF0, Fs = Fd) instead of the elastic supply
+#     schedule.  On data/KEN_2017_gtap11afr that is 59 of 65 sectors and it moves
+#     the smallest singular value of the Jacobian from 2.9e-10 to 2.0e-6 (||J||_1
+#     = 1.6e3).  The benchmark solution is unchanged (PF = 1, Fs = Fd = 0 either
+#     way).  :fixed_wage keeps the original routing.
+# (5) OLD-VINTAGE TECHNOLOGY (2026-09-14).  `par[:bench][:CHIv][(p,"Old")]` is the
+#     capital-output ratio of the old vintage at the benchmark.  Under
+#     :full_employment F-24 fixes CHIv["Old"] at that value (putty-clay: the old
+#     vintage keeps the technology it was built with) and the relative return
+#     RR[p] = R[p,"Old"]/TR becomes endogenous, so F-30 turns into a genuine
+#     disinvestment schedule.  Under :fixed_wage F-24 still pins RR = 1, which
+#     together with F-23/F-30 forces Kvd[p,"Old"] = K0[p] exactly.  Both give
+#     RR = 1 and the same solution at the benchmark.
 
 # Benchmark elasticities.  The SAM carries no elasticity information, so every
 # nest uses the same value; it is written into `par` (and therefore overrides the

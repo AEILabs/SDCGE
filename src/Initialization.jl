@@ -55,7 +55,8 @@ function _is_finite_number(x)
     return x isa Real && isfinite(float(x))
 end
 
-function enforce_nlp_safe_bounds_and_starts!(model; eps::Float64=LCGE_START_EPS)
+function enforce_nlp_safe_bounds_and_starts!(model; eps::Float64=LCGE_START_EPS,
+                                             rr_upper::Float64=1.0)
     # Move nonneg lower bounds slightly inside the feasible region and repair
     # missing/non-finite start values.
     for var in all_variables(model)
@@ -121,17 +122,23 @@ function enforce_nlp_safe_bounds_and_starts!(model; eps::Float64=LCGE_START_EPS)
         end
     end
 
-    # RR is a utilisation ratio in (0, 1]. F_24 forces RR = 1 at the benchmark.
-    # (Dropping the redundant upper bound was tried as a fix for the
-    # full-employment stall — F_24 `1 - RR ⟂ RR` has bound and equation active
-    # together — and made no measurable difference; the bound is kept because it
-    # is economically meaningful.)
+    # RR[i] = R[i,"Old"]/TR, the relative return on the old capital vintage.
+    # Under :fixed_wage F-24 pins RR = 1 and the (redundant) upper bound of 1 is
+    # kept: a variable sitting on its bound is a valid MCP solution.  (Dropping
+    # that bound was tried as a fix for the full-employment stall and made no
+    # measurable difference.)  Under :full_employment F-24 instead fixes the old
+    # vintage's capital-output ratio and RR is a genuine price: it must be free to
+    # rise above 1 in expanding sectors, so `rr_upper = Inf` is passed in.
     if haskey(model, :RR)
         RR = model[:RR]
         try
             for key in eachindex(RR)
                 set_lower_bound(RR[key], eps)
-                set_upper_bound(RR[key], 1.0)
+                if isfinite(rr_upper)
+                    set_upper_bound(RR[key], rr_upper)
+                elseif has_upper_bound(RR[key])
+                    delete_upper_bound(RR[key])
+                end
                 set_start_value(RR[key], LCGE_RR_START)
             end
         catch
@@ -481,6 +488,6 @@ function initialize_from_sam!(model, data::LinkageData)
     # therefore starts from the calibrated benchmark, rescaled through the PAR
     # supply tables above.
 
-    enforce_nlp_safe_bounds_and_starts!(model)
+    enforce_nlp_safe_bounds_and_starts!(model; rr_upper=full_employment ? Inf : 1.0)
     return model
 end

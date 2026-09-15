@@ -385,15 +385,22 @@ good, for `:balanced`).
   solves every period.
   A market-clearing alternative is implemented and selectable
   (`PAR[:labour_closure] = :full_employment`, with `PAR[:numeraire] ∈
-  {:pabs (default), :cpi}`): F-6 becomes labour-market clearing ⟂ `TW`,
+  {:cpi (default), :pabs}`): F-6 becomes labour-market clearing ⟂ `TW`,
   `UE` is fixed at its benchmark, `NW = φ·TW`, `W = (1+τ_l)·NW`, F-21 becomes
   capital-market clearing ⟂ `TR` (in the default regime `TR` has no
   determining equation — F-21 collapses to `TR = TR`, hidden because the
-  benchmark start is already the solution). It is square and replicates the
-  benchmark to 0.004 %, **but PATH stalls (`SLOW_PROGRESS`)** because the
-  vintage block is rigid: F-24 pins `RR = 1`, so old-vintage output cannot
-  adjust to a wage change. That is the next thing to fix before switching
-  the default; see the `Factors.jl` header.
+  benchmark start is already the solution), and F-24 fixes the old vintage's
+  capital-output ratio so that `RR` is a genuine relative return. It is square,
+  replicates the benchmark (0.0004 % on `KEN_2017_gtap11afr`) and a +10 % TFP
+  shock now raises gross output with no unemployment (ΣXP +17.7 %, real
+  household consumption +25.9 %, employment unchanged) where the default regime
+  turns the same shock into a 15 % fall in employment and a 2 % fall in output.
+  **It is still not the default**: long TFP paths lose their last periods
+  because `PABS` acts as the shifter of the land/natural-resource supply
+  schedules rather than as a price level, so land is effectively in perfectly
+  elastic supply and `PABS` drifts to ~1e-3 as productivity cumulates. Fixing
+  that needs one more equation than the price block has; see the `Factors.jl`
+  header ("KNOWN REMAINING DEFECT").
 - **Vintages carry no technology**: `Calibration.jl` gives Old and New capital
   identical shares and prices, so the dynamic update keeps the benchmark
   Old/New split (`vintage_rule=:benchmark_shares`); the flow-based split
