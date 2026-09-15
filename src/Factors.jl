@@ -145,6 +145,18 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     full_employment = labour_closure === :full_employment
     ue0 = get(PAR, :UE0, Dict{Any,Float64}())
 
+    # :full_employment needs a nominal anchor and only the trade closure can give
+    # it one (see the NUMERAIRE section of the header).  Warn rather than error so
+    # the pre-2026-09-14 combination can still be reproduced.
+    if full_employment && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
+        @warn string("PAR[:labour_closure] = :full_employment with bop_closure = ",
+                     get(data.par, :bop_closure, :flex_er),
+                     ": the model is then homogeneous of degree one in every nominal ",
+                     "price and PABS ends up clearing the land market instead of ",
+                     "being a price level (land supply becomes demand-determined). ",
+                     "Rebuild with prepare_data!(...; bop_closure = :fixed_er).") maxlog=1
+    end
+
     # Sector-specific ("natural resource") factor.  A sector with NO such factor
     # in the SAM still got the elastic supply schedule F-18 with the calibrator's
     # floor chi_F = 1e-9, while its demand share alpha_ff is exactly 0: F-18 reads
