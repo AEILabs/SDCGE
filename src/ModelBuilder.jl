@@ -138,6 +138,9 @@ function build_linkage_model!(m, data::LinkageData)
     end
 
     PAR = parameters(data)
+    # Remembered so solve_model! can pick closure-dependent PATH options without
+    # being handed `data` (see its `crash_method` default).
+    m.ext[:labour_closure] = Symbol(get(PAR, :labour_closure, :full_employment))
 
     add_variables!(m, data)
     initialize_from_sam!(m, data)
@@ -281,6 +284,18 @@ function solve_model!(m;
         # dXP = +0.04 % on the default and LOCALLY_SOLVED with dXP = +5.7 %/+20.3 %
         # once the limit was raised.  Scale it with the model instead.
         cumulative_iteration_limit::Integer=max(100_000, 20 * num_variables(m)),
+        # PATH's crash heuristic guesses an initial active set before the first
+        # Newton step.  On this model under :full_employment it guesses badly and
+        # PATH then spends the whole solve repairing the basis: turning it off
+        # took the 23-period TFP path at 1.2 %/yr from 22/23 to 23/23 on
+        # data/KEN_2017_gtap11afr (555 s -> 180 s), 21/23 to 23/23 on
+        # data/LSO_2018_hybrid (340 s -> 83 s) and 19/23 to 21/23 on
+        # data/CPV_2018_hybrid.  Under :fixed_wage the benchmark start is already
+        # the solution and the crash step is harmless, so it is left alone there.
+        # `nothing` means "do not set the option".
+        crash_method::Union{Nothing,AbstractString}=
+            (Symbol(get(m.ext, :labour_closure, :fixed_wage)) === :full_employment ?
+                "none" : nothing),
         show_diagnostics::Bool=true)
 
     check_initialization!(m; error_on_bad=true)
@@ -305,6 +320,12 @@ function solve_model!(m;
         set_optimizer_attribute(m, "cumulative_iteration_limit", Int(cumulative_iteration_limit))
     catch
     end
+    if crash_method !== nothing
+        try
+            set_optimizer_attribute(m, "crash_method", String(crash_method))
+        catch
+        end
+    end
 
     if show_diagnostics
         print_model_diagnostics(m)
@@ -313,6 +334,7 @@ function solve_model!(m;
         println("  convergence_tolerance = ", convergence_tolerance)
         println("  time_limit            = ", time_limit)
         println("  cumulative_iteration_limit = ", cumulative_iteration_limit)
+        println("  crash_method          = ", crash_method === nothing ? "(PATH default)" : crash_method)
         println("\nStarting PATH solve...\n")
     end
 

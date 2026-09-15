@@ -407,12 +407,13 @@ good, for `:balanced`).
   consumption up 15.8–31.0 %, employment unchanged and `UE` = 0** — where the
   default `:fixed_wage` regime turns the same shock into a 14–20 % fall in
   employment (`UE` reaches 0.95 on Chad) and flat-to-falling output. A
-  23-period TFP path at 1.2 %/yr converges 23/23 on TCD and ZMB, 22/23 on KEN,
-  21/23 on Lesotho and 19/23 on Cabo Verde (the misses are `SLOW_PROGRESS` in
-  late periods).
+  23-period TFP path at 1.2 %/yr converges **23/23 on Kenya, Chad, Zambia and
+  Lesotho** and 21/23 on Cabo Verde (two late periods end in `SLOW_PROGRESS`).
 
-  **It is still not the default** because those late-period misses remain, and
-  because it needs the non-default `:fixed_er` trade closure. With `:flex_er`
+  **It is still not the default** because of that last case, because the
+  `gtap11afr`/`hybrid` batch has not been re-run under it, and because it needs
+  the non-default `:fixed_er` trade closure, which `PAR[:labour_closure]` cannot
+  set (`bop_closure` is a `prepare_data!` argument). With `:flex_er`
   the model is homogeneous of degree one in every nominal price, `PABS = 1` is
   not a numeraire at all, and `PABS` ends up clearing the land market instead
   (land supply becomes demand-determined: +141 % on KEN). See the `Factors.jl`
