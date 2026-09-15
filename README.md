@@ -383,24 +383,41 @@ good, for `:balanced`).
   10-period run end in `ITERATION_LIMIT` (non-converged periods do not update
   the state, so the path plateaus; a warning is printed). TFP growth alone
   solves every period.
-  A market-clearing alternative is implemented and selectable
-  (`PAR[:labour_closure] = :full_employment`, with `PAR[:numeraire] ∈
-  {:cpi (default), :pabs}`): F-6 becomes labour-market clearing ⟂ `TW`,
-  `UE` is fixed at its benchmark, `NW = φ·TW`, `W = (1+τ_l)·NW`, F-21 becomes
-  capital-market clearing ⟂ `TR` (in the default regime `TR` has no
-  determining equation — F-21 collapses to `TR = TR`, hidden because the
-  benchmark start is already the solution), and F-24 fixes the old vintage's
-  capital-output ratio so that `RR` is a genuine relative return. It is square,
-  replicates the benchmark (0.0004 % on `KEN_2017_gtap11afr`) and a +10 % TFP
-  shock now raises gross output with no unemployment (ΣXP +17.7 %, real
-  household consumption +25.9 %, employment unchanged) where the default regime
-  turns the same shock into a 15 % fall in employment and a 2 % fall in output.
-  **It is still not the default**: long TFP paths lose their last periods
-  because `PABS` acts as the shifter of the land/natural-resource supply
-  schedules rather than as a price level, so land is effectively in perfectly
-  elastic supply and `PABS` drifts to ~1e-3 as productivity cumulates. Fixing
-  that needs one more equation than the price block has; see the `Factors.jl`
-  header ("KNOWN REMAINING DEFECT").
+  A market-clearing alternative is implemented and selectable — **run it with
+  `prepare_data!(...; bop_closure = :fixed_er)`**, which is what anchors the
+  nominal price level (see below):
+
+  ```julia
+  data = prepare_data!(init_data(); source=:csv, sam_path=…, sets_path=…,
+                       bop_closure = :fixed_er)
+  parameters(data)[:labour_closure] = :full_employment
+  ```
+
+  F-6 becomes labour-market clearing ⟂ `TW`, `UE` is fixed at its benchmark,
+  `NW = φ·TW`, `W = (1+τ_l)·NW`, F-21 becomes capital-market clearing ⟂ `TR`
+  (in the default regime `TR` has no determining equation — F-21 collapses to
+  `TR = TR`, hidden because the benchmark start is already the solution), and
+  F-24 fixes the old vintage's capital-output ratio so that `RR` is a genuine
+  relative return. `PAR[:numeraire]` defaults to `:pabs` under `:fixed_er` and
+  to `:cpi` under `:flex_er`; do not mix them up.
+
+  Measured on the 65-sector GTAP-Africa databases: square, benchmark replicates
+  (max |ΔXP| 0.0004 % on KEN/TCD, 0.00008 % on ZMB), and a +10 % TFP shock is
+  `LOCALLY_SOLVED` in 1–10 s with **gross output up 13.9–27.2 %, real household
+  consumption up 15.8–31.0 %, employment unchanged and `UE` = 0** — where the
+  default `:fixed_wage` regime turns the same shock into a 14–20 % fall in
+  employment (`UE` reaches 0.95 on Chad) and flat-to-falling output. A
+  23-period TFP path at 1.2 %/yr converges 23/23 on TCD and ZMB, 22/23 on KEN,
+  21/23 on Lesotho and 19/23 on Cabo Verde (the misses are `SLOW_PROGRESS` in
+  late periods).
+
+  **It is still not the default** because those late-period misses remain, and
+  because it needs the non-default `:fixed_er` trade closure. With `:flex_er`
+  the model is homogeneous of degree one in every nominal price, `PABS = 1` is
+  not a numeraire at all, and `PABS` ends up clearing the land market instead
+  (land supply becomes demand-determined: +141 % on KEN). See the `Factors.jl`
+  header for the measurements and for the closure experiment that was tried and
+  rejected.
 - **Vintages carry no technology**: `Calibration.jl` gives Old and New capital
   identical shares and prices, so the dynamic update keeps the benchmark
   Old/New split (`vintage_rule=:benchmark_shares`); the flow-based split

@@ -50,42 +50,53 @@
 # numeraire — labour is 29 % of output, so it carries the whole cost chain.
 # Under :full_employment W is endogenous and one absolute condition has to take
 # its place.  M-5 (PNUM = 1) can NOT do it: PNUM only ever multiplies transfer
-# terms that are all zero here.
-#   :cpi   (DEFAULT since 2026-09-14)  F_PABS becomes CPI[first(r)] = 1 ⟂ PABS.
-#          CPI is the mean of the PC bundle prices (M-4), so this genuinely pins
-#          the absolute price level.
-#   :pabs  Keep F_PABS (PABS = 1).  **This is not a numeraire at all.**  PABS
-#          appears only as the deflator of the land/natural-resource supply
-#          schedules F-13 (TLnd = chi_T·(PTLnd/PABS)^eta_T) and F-18
-#          (Fs = chi_F·(PF/PABS)^omega_F), in F_PS (PS = PABS) and in F-9 (WMIN,
-#          inert in this regime), never in a price-forming equation.  Fixing it
-#          therefore fixes the units of PABS and nothing else, and the model
-#          stays homogeneous of degree one in every nominal price.  Measured on
-#          data/KEN_2017_gtap11afr at AT = 1.10: the :pabs solution is exactly
-#          the :cpi solution multiplied by lambda = 18.7 (CPI 18.6996 vs 1.0000,
-#          PABS 1.0000 vs 0.0535, PTLnd/PABS = 5.342 and TLnd = 76.48 identical
-#          to five digits in both).  The corresponding Jacobian direction has
-#          sigma = 2.0e-6 against ||J||_1 = 1.6e3 and is nonzero only because of
-#          the 1e-9 guards in the denominators.  Kept for reproducing pre-
-#          2026-09-14 runs; do not use it for new work.
+# terms that are all zero here.  WHICH condition is right depends on the TRADE
+# closure, so `precompute_parameters` picks the default from `bop_closure`:
 #
-# KNOWN REMAINING DEFECT of :full_employment (2026-09-14, unresolved).
-#   Whichever numeraire is chosen, PABS ends up as the *shifter* of the land and
-#   natural-resource supply schedules rather than a price level, because F-13/
-#   F-18 are the only equations in which PABS does real work.  The consequence is
-#   that land and natural resources are effectively in perfectly elastic supply:
-#   TLnd always equals land demand and PABS moves to whatever makes that true.
-#   Measured on KEN at AT = 1.10: TLnd 31.74 -> 76.48 (+141 %) with PABS 0.0535;
-#   on ZMB PABS reaches 190, on TCD 14.8.  Raising eta_T from 0.5 to 3.0 changes
-#   the real solution by less than 0.05 pp (Sum XP +17.67 % vs +17.72 %) and only
-#   rescales PABS, which confirms that eta_T is no longer a supply elasticity
-#   here.  This is why long TFP paths still lose their last periods: the cumulated
-#   productivity gain drives PABS to ~1e-3 and the Jacobian scaling with it.
-#   Fixing it needs one more equation than the block has — PABS must be defined
-#   as a price index AND one absolute condition must be imposed, and every
-#   variable in {PABS, PS, WMIN, CPI} already has exactly one equation.  The real
-#   fix is therefore to find the Walras-redundant market-clearing equation and
-#   spend it on the numeraire.  Until then :full_employment is not the default.
+#   bop_closure = :fixed_er  ->  :pabs   (THE COMBINATION THAT WORKS)
+#       C-ER fixes the real exchange rate at ER0 and world prices WPE/WPM are
+#       parameters, so the domestic price level is anchored through the border —
+#       the standard small-open-economy closure.  PABS = 1 (F_PABS) is then just
+#       a unit normalisation and F-13/F-18 are genuine REAL supply schedules.
+#       Measured at AT = 1.10 (65-sector GTAP-Africa databases, :full_employment):
+#         KEN  LOCALLY_SOLVED  9.3 s  Sum XP +13.9 %  cons +17.6 %  TR 1.23
+#                                     CPI 0.891  TLnd +4.2 %
+#         TCD  LOCALLY_SOLVED  1.4 s  Sum XP +15.4 %  cons +15.8 %  TR 1.47
+#                                     CPI 1.010  TLnd +1.3 %
+#         ZMB  LOCALLY_SOLVED  1.9 s  Sum XP +19.9 %  cons +25.6 %  TR 1.57
+#                                     CPI 1.055  TLnd +6.2 %
+#       Employment is unchanged and UE stays 0 in all three, and RR now spans
+#       0.08-0.66, i.e. the vintage margin is actually doing work.
+#
+#   bop_closure = :flex_er  ->  :cpi     (usable, not sound)
+#       With a flexible real exchange rate and foreign saving exogenous in
+#       foreign-currency terms the model is homogeneous of degree one in every
+#       nominal price, so PABS = 1 anchors NOTHING: PABS appears only as the
+#       deflator of F-13 (TLnd = chi_T·(PTLnd/PABS)^eta_T) and F-18
+#       (Fs = chi_F·(PF/PABS)^omega_F), in F_PS and in F-9 (WMIN, inert here).
+#       Measured on KEN at AT = 1.10 the :pabs solution is exactly the :cpi
+#       solution times lambda = 18.7 (CPI 18.6996 vs 1.0000, PABS 1.0000 vs
+#       0.0535, PTLnd/PABS = 5.342 and TLnd = 76.48 identical to five digits);
+#       sigma_min for that direction is 2.0e-6 against ||J||_1 = 1.6e3, nonzero
+#       only because of the 1e-9 guards in the denominators.  CPI[first(r)] = 1
+#       ⟂ PABS restores the rank, but PABS is then the only variable left to
+#       clear the land/natural-resource markets and runs to 0.04 (KEN), 14.8
+#       (TCD) or 190 (ZMB): land supply becomes demand-determined (KEN TLnd
+#       +141 %) and TCD's real household consumption actually FALLS 4.6 % under
+#       a +10 % TFP shock.  Raising eta_T 0.5 -> 3.0 changes the real solution by
+#       < 0.05 pp and only rescales PABS, confirming eta_T is no longer acting as
+#       a supply elasticity.  Prefer :fixed_er for anything quantitative.
+#
+#   Do NOT combine :fixed_er with :cpi: the border already anchors the level, so
+#   CPI = 1 is a second absolute condition and PABS absorbs the difference
+#   (ZMB at AT = 1.10: PABS 5.2e-7, TLnd x36, SLOW_PROGRESS in 99 s).
+#
+# TRIED AND REJECTED (2026-09-14).  Spending the capital-market clearing
+#   condition F-21 on the numeraire (CPI = 1 ⟂ TR, on the theory that one
+#   market-clearing equation is Walras-redundant) does NOT work: this model is
+#   not Walras-closed.  The benchmark still replicates, but at AT = 1.10 total
+#   capital demand misses KS by +124 % (KEN), -18.2 % (TCD) and -33.0 % (ZMB).
+#   There is therefore no redundant market-clearing equation to spend.
 
 function _lcge_badfinite(x)
     return !isfinite(float(x))
