@@ -50,26 +50,63 @@
 # numeraire — labour is 29 % of output, so it carries the whole cost chain.
 # Under :full_employment W is endogenous and one absolute condition has to take
 # its place.  M-5 (PNUM = 1) can NOT do it: PNUM only ever multiplies transfer
-# terms that are all zero here, so its Jacobian column is empty.  The two
-# candidates that do work:
-#   :pabs  Keep F_PABS (PABS = 1).  PABS reaches the price system only through
-#          the upward-sloping factor-supply schedules F-13
-#          (TLnd = chi_T·(PTLnd/PABS)^eta_T) and F-18
-#          (Fs = chi_F·(PF/PABS)^omega_F), covering land + natural resources —
-#          3.8 % of value added at elasticity 0.5.  Scaling every nominal price
-#          by lambda does break F-14/F-19, so the level IS anchored, but only
-#          weakly: the nominal direction is near-singular.  This is the default:
-#          measured benchmark drift 0.004 %.
-#   :cpi   Fix CPI[first(r)] = 1 instead (⟂ PABS) and let PABS become the
-#          endogenous absolute price level it is named for.  CPI is the mean of
-#          the PC bundle prices, so this is a much stronger anchor in principle
-#          and it turns F-13/F-18 into genuine REAL supply schedules — but it
-#          only relocates the weak direction into PABS itself, and measured
-#          benchmark drift is worse (0.60 %).  Both give the same start residual.
+# terms that are all zero here.  WHICH condition is right depends on the TRADE
+# closure, so `precompute_parameters` picks the default from `bop_closure`:
+#
+#   bop_closure = :fixed_er  ->  :pabs   (THE COMBINATION THAT WORKS)
+#       C-ER fixes the real exchange rate at ER0 and world prices WPE/WPM are
+#       parameters, so the domestic price level is anchored through the border —
+#       the standard small-open-economy closure.  PABS = 1 (F_PABS) is then just
+#       a unit normalisation and F-13/F-18 are genuine REAL supply schedules.
+#       Measured at AT = 1.10 (65-sector GTAP-Africa databases, :full_employment):
+#         KEN  LOCALLY_SOLVED  9.3 s  Sum XP +13.9 %  cons +17.6 %  TR 1.23
+#                                     CPI 0.891  TLnd +4.2 %
+#         TCD  LOCALLY_SOLVED  1.4 s  Sum XP +15.4 %  cons +15.8 %  TR 1.47
+#                                     CPI 1.010  TLnd +1.3 %
+#         ZMB  LOCALLY_SOLVED  1.9 s  Sum XP +19.9 %  cons +25.6 %  TR 1.57
+#                                     CPI 1.055  TLnd +6.2 %
+#       Employment is unchanged and UE stays 0 in all three, and RR now spans
+#       0.08-0.66, i.e. the vintage margin is actually doing work.
+#
+#   bop_closure = :flex_er  ->  :cpi     (usable, not sound)
+#       With a flexible real exchange rate and foreign saving exogenous in
+#       foreign-currency terms the model is homogeneous of degree one in every
+#       nominal price, so PABS = 1 anchors NOTHING: PABS appears only as the
+#       deflator of F-13 (TLnd = chi_T·(PTLnd/PABS)^eta_T) and F-18
+#       (Fs = chi_F·(PF/PABS)^omega_F), in F_PS and in F-9 (WMIN, inert here).
+#       Measured on KEN at AT = 1.10 the :pabs solution is exactly the :cpi
+#       solution times lambda = 18.7 (CPI 18.6996 vs 1.0000, PABS 1.0000 vs
+#       0.0535, PTLnd/PABS = 5.342 and TLnd = 76.48 identical to five digits);
+#       sigma_min for that direction is 2.0e-6 against ||J||_1 = 1.6e3, nonzero
+#       only because of the 1e-9 guards in the denominators.  CPI[first(r)] = 1
+#       ⟂ PABS restores the rank, but PABS is then the only variable left to
+#       clear the land/natural-resource markets and runs to 0.04 (KEN), 14.8
+#       (TCD) or 190 (ZMB): land supply becomes demand-determined (KEN TLnd
+#       +141 %) and TCD's real household consumption actually FALLS 4.6 % under
+#       a +10 % TFP shock.  Raising eta_T 0.5 -> 3.0 changes the real solution by
+#       < 0.05 pp and only rescales PABS, confirming eta_T is no longer acting as
+#       a supply elasticity.  Prefer :fixed_er for anything quantitative.
+#
+#   Do NOT combine :fixed_er with :cpi: the border already anchors the level, so
+#   CPI = 1 is a second absolute condition and PABS absorbs the difference
+#   (ZMB at AT = 1.10: PABS 5.2e-7, TLnd x36, SLOW_PROGRESS in 99 s).
+#
+# TRIED AND REJECTED (2026-09-14).  Spending the capital-market clearing
+#   condition F-21 on the numeraire (CPI = 1 ⟂ TR, on the theory that one
+#   market-clearing equation is Walras-redundant) does NOT work: this model is
+#   not Walras-closed.  The benchmark still replicates, but at AT = 1.10 total
+#   capital demand misses KS by +124 % (KEN), -18.2 % (TCD) and -33.0 % (ZMB).
+#   There is therefore no redundant market-clearing equation to spend.
 
 function _lcge_badfinite(x)
     return !isfinite(float(x))
 end
+
+# A benchmark factor payment at or below this is "no factor at all".  The
+# calibrator writes chi_F[i] = max(nrs[i], 1e-9), so a sector with no
+# natural-resource row in the SAM gets 1e-9; SAM totals are 1e4-1e5 and the
+# smallest genuine sectoral payment in the shipped databases is ~1e-3.
+const LCGE_FACTOR_ZERO = 1.0e-6
 
 function add_factor_equations!(model, data::LinkageData, PAR)
     S = data.sets
@@ -99,8 +136,6 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     lndmax_inf = _lcge_badfinite(PAR[:LndMAX])
     omega_T_inf= _lcge_badfinite(PAR[:omega_T])
     omega_K_inf= _lcge_badfinite(PAR[:omega_K])
-    omega_F_inf= [ii for ii in i if  _lcge_badfinite(PAR[:omega_F][ii])]
-    omega_F_fin= [ii for ii in i if !_lcge_badfinite(PAR[:omega_F][ii])]
 
     # ── Labour-market closure switch (see the header) ────────────────────────
     labour_closure = get(PAR, :labour_closure, :full_employment)
@@ -109,6 +144,35 @@ function add_factor_equations!(model, data::LinkageData, PAR)
               "use :full_employment or :fixed_wage.")
     full_employment = labour_closure === :full_employment
     ue0 = get(PAR, :UE0, Dict{Any,Float64}())
+
+    # :full_employment needs a nominal anchor and only the trade closure can give
+    # it one (see the NUMERAIRE section of the header).  Warn rather than error so
+    # the pre-2026-09-14 combination can still be reproduced.
+    if full_employment && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
+        @warn string("PAR[:labour_closure] = :full_employment with bop_closure = ",
+                     get(data.par, :bop_closure, :flex_er),
+                     ": the model is then homogeneous of degree one in every nominal ",
+                     "price and PABS ends up clearing the land market instead of ",
+                     "being a price level (land supply becomes demand-determined). ",
+                     "Rebuild with prepare_data!(...; bop_closure = :fixed_er).") maxlog=1
+    end
+
+    # Sector-specific ("natural resource") factor.  A sector with NO such factor
+    # in the SAM still got the elastic supply schedule F-18 with the calibrator's
+    # floor chi_F = 1e-9, while its demand share alpha_ff is exactly 0: F-18 reads
+    # Fs = 1e-9·PF^0.5 and P-23/P-47/P-65 give Fd = 0, so PF[i]'s entire Jacobian
+    # column is a single entry of order 5e-10.  On data/KEN_2017_gtap11afr 59 of
+    # 65 sectors are in that state and they set the smallest singular value of the
+    # Jacobian to 2.9e-10 against ||J||_1 = 1.6e3 — a condition number of 1e13 and
+    # the largest single source of PATH's pivoting failures under
+    # :full_employment (raising sigma_min to 2.0e-6 turned a +10 % TFP shock on
+    # KEN from ITERATION_LIMIT into LOCALLY_SOLVED).  Under :full_employment such
+    # sectors therefore take the fixed-real-price branch instead
+    # (PF = PABS·PF0, Fs = Fd = 0), which leaves the benchmark solution unchanged.
+    # :fixed_wage keeps the original routing so it stays byte-identical.
+    _lcge_nofactor(ii) = full_employment && get(PAR[:chi_F], ii, 0.0) <= LCGE_FACTOR_ZERO
+    omega_F_inf= [ii for ii in i if  (_lcge_badfinite(PAR[:omega_F][ii]) || _lcge_nofactor(ii))]
+    omega_F_fin= [ii for ii in i if !(_lcge_badfinite(PAR[:omega_F][ii]) || _lcge_nofactor(ii))]
 
     # ── (F-1) Rural labor supply ──────────────────────────────────────────────
     @constraint(model, F_1[ll in l],
@@ -329,10 +393,37 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     @constraint(model, F_23[ii in i, vv in v],
         (CHIv[ii,vv] * XPv[ii,vv]) - (Kvd[ii,vv]) ⟂ CHIv[ii,vv])
 
-    # ── (F-24) Old-vintage capacity utilisation bound ─────────────────────────
+    # ── (F-24) Old-vintage technology / relative return on old capital ────────
     # F_24_old_supply removed (would duplicate F_23 for CHIv["Old"]).
-    @constraint(model, F_24_rr_bound[ii in i],
-        (1.0) - (RR[ii]) ⟂ RR[ii])
+    #
+    # :fixed_wage — the original pin RR[i] = 1.  Combined with F-23 and F-30 it
+    #   forces Kvd[i,"Old"] = K0[i] exactly: half the capital stock is frozen in
+    #   place AND earns the economy-wide return, so the putty-clay margin the
+    #   vintage structure exists to represent does not exist.
+    #
+    # :full_employment — putty-clay proper.  The OLD vintage's technology is the
+    #   one installed when it was new, so its capital-output ratio is fixed at the
+    #   calibrated benchmark value; RR[i] = R[i,"Old"]/TR is the relative return
+    #   that sustains it, and F-30 then makes old-vintage OUTPUT adjust through
+    #   the disinvestment schedule XPv·CHIv = K0·RR^eta_k.  Sectors that want to
+    #   contract shed old capital (RR < 1) instead of being forced to keep using
+    #   K0; sectors that want to expand bid RR above 1.
+    #   Why this matters: with RR pinned, a uniform +10 % TFP shock made the old
+    #   vintage's forced output RISE (it has to absorb K0) while F-29
+    #   (XPv[New] = XP - XPv[Old]) drove new-vintage output to its lower bound in
+    #   4-5 sectors on data/TCD_2017_gtap11afr and data/ZMB_2017_gtap11afr, which
+    #   capped gross output at the old vintage's forced level and destroyed those
+    #   sectors (ZMB "ctl": XPv[Old] 32.5 -> 52.6, XPv[New] 32.5 -> 0, XP 65 -> 15).
+    #   At the benchmark CHIv[i,"Old"] is already chi0 and RR[i] = 1 solves this
+    #   equation exactly, so the benchmark is untouched.
+    if full_employment
+        chi0 = get(PAR[:bench], :CHIv, Dict{Any,Float64}())
+        @constraint(model, F_24_old_technology[ii in i],
+            (CHIv[ii,"Old"]) - (get(chi0, (ii,"Old"), 1.0)) ⟂ RR[ii])
+    else
+        @constraint(model, F_24_rr_bound[ii in i],
+            (1.0) - (RR[ii]) ⟂ RR[ii])
+    end
 
     # ── (F-25) Aggregate capital supply ───────────────────────────────────────
     # :full_employment — the aggregate stock is exogenous, taken from the

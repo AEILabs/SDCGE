@@ -161,3 +161,75 @@ using DataFrames
         @test abs(yg[2]/yg[1]     - 1) < 1e-6
     end
 end
+
+# ── Numeric regression: the default closure on a real database ───────────────
+# Solves the committed Kenya database (test/data/KEN_2018_hybrid_*, 65 goods)
+# under the shipped defaults (:fixed_wage, bop_closure = :flex_er, trade_closure
+# = :bop), at the benchmark and under a uniform -10 % TFP shock, and compares
+# the count, sum and sum of squares of every variable family (XP, VA, PABS, ...)
+# against test/reference/KEN_2018_hybrid_default.tsv at rtol 1e-8.  Any change
+# to a solved value moves its family's sums, so this guards the promise that a
+# change to the model leaves the default closure's solutions untouched.  It
+# needs PATH, so it runs only with LCGE_TEST_SOLVE=true.  After a change that is
+# MEANT to move the default solution, regenerate the reference deliberately:
+#     LCGE_TEST_SOLVE=true LCGE_WRITE_REFERENCE=true julia --project=. test/runtests.jl
+if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
+    @testset "default-closure regression (KEN_2018_hybrid)" begin
+        ref_path = joinpath(@__DIR__, "reference", "KEN_2018_hybrid_default.tsv")
+        ken_sam  = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sam.csv")
+        ken_sets = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sets.csv")
+        write_ref = get(ENV, "LCGE_WRITE_REFERENCE", "false") == "true"
+
+        family_stats(m) = begin
+            acc = Dict{String,Vector{Float64}}()
+            for v in all_variables(m)
+                fam = String(first(split(name(v), '[')))
+                x = value(v)
+                s = get!(acc, fam, [0.0, 0.0, 0.0]); s[1] += 1; s[2] += x; s[3] += x * x
+            end
+            acc
+        end
+
+        got = Dict{Tuple{String,String},Vector{Float64}}()
+        for (tag, at) in (("bench", 1.0), ("tfp090", 0.90))
+            d = prepare_data!(init_data(); sets_path=ken_sets, source=:csv, sam_path=ken_sam,
+                              balance=:none, outdir=nothing)
+            PAR = parameters(d)
+            @test PAR[:labour_closure] == :fixed_wage           # the default this test protects
+            for k in keys(PAR[:AT]); PAR[:AT][k] = at; end
+            mr = model(d; show_solver_output=false)
+            solve_model!(mr; output="no", show_diagnostics=false)
+            println("regression ", tag, ": termination_status = ", termination_status(mr))
+            @test termination_status(mr) == JuMP.LOCALLY_SOLVED
+            for (fam, s) in family_stats(mr); got[(tag, fam)] = s; end
+        end
+
+        if write_ref
+            mkpath(dirname(ref_path))
+            open(ref_path, "w") do io
+                println(io, "scenario\tfamily\tn\tsum\tsumsq")
+                for ((tag, fam), s) in sort!(collect(got); by=first)
+                    println(io, tag, '\t', fam, '\t', Int(s[1]), '\t', repr(s[2]), '\t', repr(s[3]))
+                end
+            end
+            println("wrote ", ref_path)
+        else
+            @test isfile(ref_path)
+            ref = Dict{Tuple{String,String},Vector{Float64}}()
+            for line in Iterators.drop(eachline(ref_path), 1)
+                f = split(line, '\t')
+                ref[(String(f[1]), String(f[2]))] = [parse(Float64, f[3]), parse(Float64, f[4]), parse(Float64, f[5])]
+            end
+            @test Set(keys(ref)) == Set(keys(got))               # same variable families, both scenarios
+            nbad = 0
+            for (k, r) in ref
+                haskey(got, k) || continue
+                g = got[k]
+                ok = g[1] == r[1] && isapprox(g[2], r[2]; rtol=1e-8, atol=1e-12) &&
+                     isapprox(g[3], r[3]; rtol=1e-8, atol=1e-12)
+                ok || (nbad += 1; println("  regression mismatch ", k, ": got ", g, " ref ", r))
+            end
+            @test nbad == 0
+        end
+    end
+end

@@ -149,17 +149,36 @@ function precompute_parameters(data::LinkageData)
     # Labour-market closure (see the header of Factors.jl):
     #   :fixed_wage      — W = 1 and UE absorbs supply minus demand   (default)
     #   :full_employment — the wage TW clears sum_i LV = LS·(1-UE0)
-    # :full_employment is implemented and square but does NOT converge yet
-    # (PATH: SLOW_PROGRESS after ~440 major iterations of backtracking steps,
-    # benchmark drift ~0.005-0.009 %); :fixed_wage stays the default because it
-    # replicates the benchmark and solves in ~1 s.  See the Factors.jl header
-    # and the hand-over notes for the remaining diagnosis.
+    # :full_employment is square, replicates the benchmark (0.0004 % on
+    # data/KEN_2017_gtap11afr) and, unlike the default, turns a +10 % TFP shock
+    # into higher output rather than higher unemployment.  It is still NOT the
+    # default because long TFP paths lose their last periods: PABS acts as the
+    # shifter of the land/natural-resource supply schedules instead of a price
+    # level, so land is effectively in perfectly elastic supply and PABS drifts
+    # to ~1e-3 as productivity cumulates.  See the "KNOWN REMAINING DEFECT"
+    # section of the Factors.jl header.
     PAR[:labour_closure] = :fixed_wage
-    # Numeraire under :full_employment (ignored under :fixed_wage, where W = 1):
-    #   :pabs — PABS = 1 (default; benchmark drift 0.004 %)
-    #   :cpi  — CPI[first(r)] = 1, PABS endogenous   (benchmark drift 0.60 %)
-    # Both give the same start residual; :pabs is the more stable of the two.
-    PAR[:numeraire] = :pabs
+    # Numeraire under :full_employment (ignored under :fixed_wage, where W = 1).
+    # Which one is right depends on whether the TRADE closure already anchors the
+    # nominal level, so the default follows `bop_closure` (see the Factors.jl
+    # header for the measurements):
+    #   bop_closure = :fixed_er → :pabs.  ER = ER0 with exogenous world prices
+    #           anchors the domestic price level the way a small open economy is
+    #           normally closed, so PABS = 1 is just a unit normalisation and
+    #           F-13/F-18 become genuine real supply schedules.  This is the
+    #           combination that works: on KEN/TCD/ZMB a +10 % TFP shock is
+    #           LOCALLY_SOLVED in 1.4-9.3 s with land supply up only 1-6 %.
+    #   bop_closure = :flex_er → :cpi.  With a flexible real exchange rate and
+    #           foreign saving exogenous in foreign currency the model is
+    #           homogeneous of degree one in every nominal price, so PABS = 1
+    #           anchors nothing (at AT = 1.10 on KEN the :pabs solution is the
+    #           :cpi solution times lambda = 18.7) and CPI[first(r)] = 1 has to
+    #           take over.  PABS is then the only variable left to absorb the
+    #           land/natural-resource market clearing and runs to 0.04 (KEN) or
+    #           190 (ZMB); land becomes demand-determined.  Usable but not sound.
+    # Setting PAR[:numeraire] by hand after prepare_data! overrides this.
+    PAR[:numeraire] =
+        Symbol(get(data.par, :bop_closure, :flex_er)) === :fixed_er ? :pabs : :cpi
     _fill!(PAR, :UE0, l, 0.0)          # benchmark unemployment rate per skill
     _fill!(PAR, :chi_migr, l, 0.0)
     _fill!(PAR, :omega_migr, l, 0.5)
