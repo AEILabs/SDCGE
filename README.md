@@ -28,16 +28,18 @@ The model is written as a square **mixed complementarity problem (MCP)** in
   deficit is exogenous foreign saving and the real exchange rate clears the
   current account; `:balanced` keeps the legacy per-good trade balance. See
   "Closures".
-- **Real country databases**: 300 African SAMs (GTAP Africa V3 2017 and
-  EMERGING/GTAP hybrids 2018, 65 or up to 133 sectors, labour-share variants)
-  built by the pipeline in `~/Documents/Data/CGE`
-  ([AEILabs/CGE-SAMs](https://github.com/AEILabs/CGE-SAMs)) under
-  `data/<ISO3>_<year>_<family>/` (git-ignored, regenerate with its
-  `R/09_export_sdcge.R`; `data/registry.csv` lists them). Every one loads,
-  balances and calibrates without rescaling; PATH solves 267, reproduces the
-  benchmark within 1 % for 239 and a 2-period zero-growth run succeeds for
-  252 (misses: tiny 133-sector activities and three inconsistent
-  government accounts).
+- **Real country databases**: 333 SAMs for base year 2023 built by the pipeline in
+  `~/Documents/Data/CGE` ([AEILabs/CGE-SAMs](https://github.com/AEILabs/CGE-SAMs)) under
+  `data/<ISO3>_<year>_<family>/` (git-ignored, regenerate with its `R/09_export_sdcge.R`;
+  `data/registry.csv` lists them): `gtap12` (GTAP 12, 144 countries, 65 sectors), `hybrid`
+  (EMERGING 2023 levels × GTAP 12 composite structure, 25 economies GTAP 12 lacks) and
+  `hybrid133` (EMERGING's own 89–133 sectors, 164 economies). Every one loads, balances and
+  calibrates without rescaling. `gtap12`: PATH solves 142/144, 139 within 1 % of the benchmark,
+  2-period run 142 (Mauritius and Hong Kong stall in the land CET: GTAP 12 books no crop land
+  there). `hybrid`: 25/25, 23 within 1 %. `hybrid133`: 156/164 solve but only 74 within 1 %
+  (median 1.2 %; production-nest residuals of tiny activities). The 2017 GTAP Africa V3 and 2018
+  hybrid databases cited in older notes (e.g. `KEN_2017_gtap11afr`) are no longer exported;
+  regenerate one with `Rscript R/09_export_sdcge.R gtap11afr 2017 KEN` if needed.
 - **The benchmark replicates**: every equation holds at the calibrated start
   values, PATH reports `LOCALLY_SOLVED` after one major iteration (≈4 s).
 - Recursive dynamics keep an explicit capital stock (`Kstock0 = I0/δ`,
