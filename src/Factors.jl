@@ -146,6 +146,15 @@ function add_factor_equations!(model, data::LinkageData, PAR)
               "use :full_employment or :fixed_wage.")
     full_employment = labour_closure === :full_employment
     ue0 = get(PAR, :UE0, Dict{Any,Float64}())
+    # The three fixed-wage repairs of 2026-10-04 (F-6 TW = 1, F-7 zone unemployment, F-21
+    # TR = 1) apply under the balance-of-payments trade closure, where C-9 is dropped and
+    # nothing else is redundant, so each removed a genuinely free direction.  Under the legacy
+    # :balanced closure C-9 is IMPOSED next to good-by-good trade balance, Walras' law makes
+    # one equation redundant, and those free directions are what the system has instead: with
+    # them pinned the bundled synthetic SAM's period-2 baseline no longer replicates and +2 %
+    # TFP lands anywhere between −8 % and −48 % of real GDP.  :balanced keeps the original
+    # equations, byte-identical.
+    fw_anchor = !full_employment && Symbol(get(PAR, :trade_closure, :bop)) !== :balanced
 
     # :full_employment needs a nominal anchor and only the trade closure can give
     # it one (see the NUMERAIRE section of the header).  Warn rather than error so
@@ -239,8 +248,13 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # zig-zagged +3.24/+2.37/+3.20/+2.31 % on a path whose exogenous state is
         # identical every period.  The fixed wage is now the net wage TW = 1, and
         # F-12 below derives the employer wage from it in both closures.
-        @constraint(model, F_6_wage_anchor[ll in migr_segmented],
-            (TW[ll,"national"]) - (1.0) ⟂ TW[ll,"national"])
+        if fw_anchor
+            @constraint(model, F_6_wage_anchor[ll in migr_segmented],
+                (TW[ll,"national"]) - (1.0) ⟂ TW[ll,"national"])
+        else
+            @constraint(model, F_6_segmented[ll in migr_segmented],
+                (TW[ll,"national"]) - (AVGW[ll,"national"]) ⟂ TW[ll,"national"])
+        end
 
         # ── (F-7) Zone-specific wage condition ────────────────────────────────
         @constraint(model, F_7_integrated[ll in migr_integrated, gg in gs],
@@ -254,8 +268,13 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # tariffs, SLOW_PROGRESS after 83 s → LOCALLY_SOLVED in 12 s; Tanzania and
         # Comoros likewise; Kenya hybrid133 +2 % TFP 40 s → 7 s, with the SAM at
         # its benchmark scale).  The benchmark is unchanged (every UE is 0 there).
-        @constraint(model, F_7_segmented[ll in migr_segmented, gg in gs],
-            (UE[ll,gg]) - (UE[ll,"national"]) ⟂ UE[ll,gg])
+        if fw_anchor
+            @constraint(model, F_7_segmented[ll in migr_segmented, gg in gs],
+                (UE[ll,gg]) - (UE[ll,"national"]) ⟂ UE[ll,gg])
+        else
+            @constraint(model, F_7_segmented[ll in migr_segmented, gg in gs],
+                ((TW[ll,gg] - WMIN[ll,gg]) * UE[ll,gg]) - 0.0 ⟂ UE[ll,gg])
+        end
 
         # ── (F-8) National minimum wage ───────────────────────────────────────
         @constraint(model, F_8[ll in migr_integrated],
@@ -430,7 +449,12 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # free direction: a +20 % foreign-saving shock on data/KEN_2023_hybrid133
         # landed at TR = 1.07, 0.98 or 1.13 depending only on the SAM's units,
         # each "LOCALLY_SOLVED" with C-9 missing by 2-17 % of investment.
-        @constraint(model, F_21_fixed_return, (TR - 1.0) - 0.0 ⟂ TR)
+        if fw_anchor
+            @constraint(model, F_21_fixed_return, (TR - 1.0) - 0.0 ⟂ TR)
+        else
+            @constraint(model, F_21_cet_capital,
+                (TR - (sum(PAR[:gamma_K][ii] * R[ii,"Old"]^(1 + PAR[:omega_K]) for ii in i))^(1/(1 + PAR[:omega_K]))) - 0.0 ⟂ TR)
+        end
     end
 
     # ── (F-22) Sectoral capital-market equilibrium ────────────────────────────
