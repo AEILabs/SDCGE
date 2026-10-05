@@ -321,3 +321,29 @@ function precompute_parameters(data::LinkageData)
     sanitize_parameters!(PAR)
     return PAR
 end
+
+"""
+    set_benchmark_unemployment!(data, u)
+
+PROTOTYPE (proto/wage-floor). Give the benchmark an unemployment rate `u` (0 <= u < 0.95)
+that the SAM cannot carry — a SAM records the wage bill of the employed only, so every
+calibrated benchmark has UE0 = 0 and labour demand equal to the labour force.  The labour
+force is scaled up to employment / (1 − u) (`LS0` in every zone, `LSupply`) and `UE0 = u`;
+employment, wages and every SAM flow are unchanged.  Call it after `prepare_data!` and
+before the first `model(data)`.  Under `:fixed_wage` it moves only `UE`; under
+`:full_employment` F-6 keeps employment at LS·(1 − UE0), i.e. at the benchmark; under
+`:wage_floor` it is the slack the economy can absorb at the floor wage before the wage rises.
+"""
+function set_benchmark_unemployment!(data::LinkageData, u::Real)
+    0.0 <= u < 0.95 || error("benchmark unemployment rate must be in [0, 0.95), got $u")
+    PAR = parameters(data)
+    S = data.sets
+    for ll in S[:l]
+        for gg in S[:gz]
+            PAR[:LS0][(ll, gg)] /= (1 - u)
+        end
+        PAR[:LSupply][ll] /= (1 - u)
+        PAR[:UE0][ll] = float(u)
+    end
+    return data
+end

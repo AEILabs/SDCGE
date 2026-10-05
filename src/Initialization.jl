@@ -488,6 +488,7 @@ function initialize_from_sam!(model, data::LinkageData)
     # therefore starts from the calibrated benchmark, rescaled through the PAR
     # supply tables above.
 
-    enforce_nlp_safe_bounds_and_starts!(model; rr_upper=full_employment ? Inf : 1.0)
+    market = full_employment || get(PAR, :labour_closure, :fixed_wage) === :wage_floor
+    enforce_nlp_safe_bounds_and_starts!(model; rr_upper=market ? Inf : 1.0)
     return model
 end

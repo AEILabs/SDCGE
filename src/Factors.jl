@@ -141,10 +141,22 @@ function add_factor_equations!(model, data::LinkageData, PAR)
 
     # ── Labour-market closure switch (see the header) ────────────────────────
     labour_closure = get(PAR, :labour_closure, :full_employment)
-    labour_closure in (:full_employment, :fixed_wage) ||
+    labour_closure in (:full_employment, :fixed_wage, :wage_floor) ||
         error("Unknown PAR[:labour_closure] = $(labour_closure); " *
-              "use :full_employment or :fixed_wage.")
+              "use :full_employment, :fixed_wage or :wage_floor.")
+    # :wage_floor (PROTOTYPE, branch proto/wage-floor): the LINKAGE minimum-wage
+    # regime as a proper complementarity.  Labour clears with unemployment,
+    #     Σ_i LV[l,i] = LS[l]·(1 − UE[l])                        ⟂ TW[l]
+    #     TW[l] − WMIN[l] ≥ 0   ⟂   UE[l] ≥ 0                     (F-10)
+    # so the wage sits on its floor WMIN (= the benchmark wage, chi_wmin = 1)
+    # while there is unemployment and rises once demand reaches the labour force.
+    # Everything else — capital clearing on TR, putty-clay F-24, the NR routing,
+    # W = (1+tau_l)·NW, the numeraire — is the :full_employment machinery, so it
+    # has the same requirement: bop_closure = :fixed_er.
+    wage_floor = labour_closure === :wage_floor
     full_employment = labour_closure === :full_employment
+    # `market` = the wage is a price (it clears, or can clear, the labour market).
+    market = full_employment || wage_floor
     ue0 = get(PAR, :UE0, Dict{Any,Float64}())
     # The three fixed-wage repairs of 2026-10-04 (F-6 TW = 1, F-7 zone unemployment, F-21
     # TR = 1) apply under the balance-of-payments trade closure, where C-9 is dropped and
@@ -159,7 +171,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     # :full_employment needs a nominal anchor and only the trade closure can give
     # it one (see the NUMERAIRE section of the header).  Warn rather than error so
     # the pre-2026-09-14 combination can still be reproduced.
-    if full_employment && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
+    if market && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
         @warn string("PAR[:labour_closure] = :full_employment with bop_closure = ",
                      get(data.par, :bop_closure, :flex_er),
                      ": the model is then homogeneous of degree one in every nominal ",
@@ -181,7 +193,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     # sectors therefore take the fixed-real-price branch instead
     # (PF = PABS·PF0, Fs = Fd = 0), which leaves the benchmark solution unchanged.
     # :fixed_wage keeps the original routing so it stays byte-identical.
-    _lcge_nofactor(ii) = full_employment && get(PAR[:chi_F], ii, 0.0) <= LCGE_FACTOR_ZERO
+    _lcge_nofactor(ii) = market && get(PAR[:chi_F], ii, 0.0) <= LCGE_FACTOR_ZERO
     omega_F_inf= [ii for ii in i if  (_lcge_badfinite(PAR[:omega_F][ii]) || _lcge_nofactor(ii))]
     omega_F_fin= [ii for ii in i if !(_lcge_badfinite(PAR[:omega_F][ii]) || _lcge_nofactor(ii))]
 
@@ -232,6 +244,23 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # ── (F-10) Unemployment exogenous at its benchmark rate ───────────────
         @constraint(model, F_10_ue_fixed[ll in l, gg in gz],
             (UE[ll,gg]) - (get(ue0, ll, 0.0)) ⟂ UE[ll,gg])
+    elseif wage_floor
+        # ── (F-6) Labour-market clearing WITH unemployment ⟂ the wage ──────────
+        @constraint(model, F_6_floor_clearing[ll in l],
+            (sum(LV[ll,ii] + Nfirm[ii]*LF_d[ll,ii] for ii in i)) -
+            (LS[ll,"national"] * (1 - UE[ll,"national"])) ⟂ TW[ll,"national"])
+        @constraint(model, F_7_zone_wage[ll in l, gg in gs],
+            (TW[ll,gg]) - (TW[ll,"national"]) ⟂ TW[ll,gg])
+        # ── (F-9) The floor itself (chi_wmin = 1, omega = 0: the benchmark wage)
+        @constraint(model, F_9_wmin[ll in l, gg in gz],
+            (WMIN[ll,gg]) - (PAR[:chi_wmin][(ll,gg)] *
+            PS[gg]^PAR[:omega_ps][gg] *
+            PABS^PAR[:omega_p][gg]) ⟂ WMIN[ll,gg])
+        # ── (F-10) TW ≥ WMIN ⟂ UE ≥ 0: the regime switch ─────────────────────
+        @constraint(model, F_10_floor[ll in l],
+            (TW[ll,"national"]) - (WMIN[ll,"national"]) ⟂ UE[ll,"national"])
+        @constraint(model, F_10_zone[ll in l, gg in gs],
+            (UE[ll,gg]) - (UE[ll,"national"]) ⟂ UE[ll,gg])
     else
         # ── (F-6) National wage condition ─────────────────────────────────────
         @constraint(model, F_6_integrated[ll in migr_integrated],
@@ -310,7 +339,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     @constraint(model, F_11[ll in l, ii in i],
         (NW[ll,ii]) - (PAR[:phi_wage][(ll,ii)] * TW[ll,"national"]) ⟂ NW[ll,ii])
 
-    if full_employment
+    if market
         # ── (F-12) Gross employer wage = net wage × payroll-tax wedge ─────────
         # W is endogenous: it is what the demand side (P-72/P-75) responds to and
         # what F-6 clears.  With tau_l = 0 (no SAM payroll-tax account) this is
@@ -436,7 +465,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     if omega_K_inf
         @constraint(model, F_21_mobile_capital,
             (sum(sum(Kvd[ii,vv] for vv in v) + Nfirm[ii]*KF_d[ii] for ii in i)) - (KS) ⟂ KS)
-    elseif full_employment
+    elseif market
         @constraint(model, F_21_capital_clearing,
             (sum(Kvd[ii,vv] for ii in i for vv in v) +
              sum(Nfirm[ii]*KF_d[ii] for ii in i)) - (KS) ⟂ TR)
@@ -488,7 +517,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     #   sectors (ZMB "ctl": XPv[Old] 32.5 -> 52.6, XPv[New] 32.5 -> 0, XP 65 -> 15).
     #   At the benchmark CHIv[i,"Old"] is already chi0 and RR[i] = 1 solves this
     #   equation exactly, so the benchmark is untouched.
-    if full_employment
+    if market
         chi0 = get(PAR[:bench], :CHIv, Dict{Any,Float64}())
         @constraint(model, F_24_old_technology[ii in i],
             (CHIv[ii,"Old"]) - (get(chi0, (ii,"Old"), 1.0)) ⟂ RR[ii])
@@ -503,7 +532,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     #   periods).  Market clearing is F-21 above, complementary to TR.
     # :fixed_wage — the previous behaviour: KS is *defined* as total capital
     #   demand, so capital is in perfectly elastic supply and TR is undetermined.
-    if full_employment
+    if market
         ks_total = sum(get(PAR[:KSupply], (ii,vv), 0.0) for ii in i for vv in v)
         @constraint(model, F_25, (KS) - (ks_total) ⟂ KS)
     else
@@ -572,7 +601,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     #           be the endogenous absolute price level it is named for, which
     #           also turns F-13/F-18 into genuine REAL supply schedules.
     numeraire = get(PAR, :numeraire, :cpi)
-    if full_employment && numeraire === :cpi
+    if market && numeraire === :cpi
         @constraint(model, F_PABS_numeraire, (model[:CPI][first(r)]) - (1.0) ⟂ PABS)
     else
         @constraint(model, F_PABS, (PABS) - (1.0) ⟂ PABS)
@@ -586,7 +615,7 @@ function add_factor_equations!(model, data::LinkageData, PAR)
 
     # Under :full_employment the TW[l,gs] and WMIN[l,"national"] equations are
     # already supplied by F_7_zone_wage and F_9_wmin above.
-    if !full_employment
+    if !market
         # TW[l,gs] for segmented migration: zone threshold wage equals average zone wage.
         # For integrated migration this is handled by F_7_integrated (TW[l,gs] = TW[l,"national"]).
         @constraint(model, F_7_tw_segmented[ll in migr_segmented, gg in gs],

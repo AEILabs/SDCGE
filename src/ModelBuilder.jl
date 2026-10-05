@@ -294,7 +294,7 @@ function solve_model!(m;
         # the solution and the crash step is harmless, so it is left alone there.
         # `nothing` means "do not set the option".
         crash_method::Union{Nothing,AbstractString}=
-            (Symbol(get(m.ext, :labour_closure, :fixed_wage)) === :full_employment ?
+            (Symbol(get(m.ext, :labour_closure, :fixed_wage)) in (:full_employment, :wage_floor) ?
                 "none" : nothing),
         show_diagnostics::Bool=true)
 
