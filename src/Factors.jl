@@ -245,8 +245,17 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # ── (F-7) Zone-specific wage condition ────────────────────────────────
         @constraint(model, F_7_integrated[ll in migr_integrated, gg in gs],
             (TW[ll,gg]) - (TW[ll,"national"]) ⟂ TW[ll,gg])
+        # Zone unemployment = the national rate (fixed 2026-10-04).  This was
+        # (TW − WMIN)·UE = 0 ⟂ UE with TW ≡ WMIN ≡ 1 (omega_ue = 0): a zero row in
+        # both UE and TW.  UE[zone] reaches nothing but the migration rule F-5,
+        # whose flows cancel in the national supply F-3, so the economy never saw
+        # it — PATH did: the two zero rows per skill are where its Newton steps
+        # stalled a few 1e-6 above zero on large shocks (Ghana gtap12 −20 %
+        # tariffs, SLOW_PROGRESS after 83 s → LOCALLY_SOLVED in 12 s; Tanzania and
+        # Comoros likewise; Kenya hybrid133 +2 % TFP 40 s → 7 s, with the SAM at
+        # its benchmark scale).  The benchmark is unchanged (every UE is 0 there).
         @constraint(model, F_7_segmented[ll in migr_segmented, gg in gs],
-            ((TW[ll,gg] - WMIN[ll,gg]) * UE[ll,gg]) - 0.0 ⟂ UE[ll,gg])
+            (UE[ll,gg]) - (UE[ll,"national"]) ⟂ UE[ll,gg])
 
         # ── (F-8) National minimum wage ───────────────────────────────────────
         @constraint(model, F_8[ll in migr_integrated],
