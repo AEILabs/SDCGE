@@ -338,8 +338,23 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     # ── (F-16) Land-market equilibrium → determines net land price NPT ────────
     # In MCP form: excess supply (Ts - Td) ⟂ NPT ≥ 0.
     # Either the market clears (Ts = Td) or the land price is zero.
-    @constraint(model, F_16[ii in ag],
+    #
+    # An agricultural sector that pays NO land in the SAM (gamma_T = 0, alpha_t
+    # = 0) has no land market: F-15 holds Ts at its 1e-8 floor and the demand
+    # nest holds Td there too, so F-16 reads 1e-8 − 1e-8 = 0 for every NPT — a
+    # free price — and Y-1 pays the household NPT·Td.  PATH used that (fixed
+    # 2026-10-04): on data/KEN_2023_hybrid133 (HS05, livestock, no feed and no
+    # land) a +20 % foreign-saving shock came back LOCALLY_SOLVED with
+    # PT[HS05] = 8.5e10, i.e. 8.5e10·1e-8 = 851 of land income created from
+    # nothing, real GDP +24 % and C-9 missing by 27 % of investment.  Such
+    # sectors take the non-agricultural treatment of their land price instead
+    # (NPT = 1); the benchmark start already has NPT = 1, so it is unchanged.
+    ag_land   = [ii for ii in ag if get(PAR[:gamma_T], ii, 0.0) > 0.0]
+    ag_noland = [ii for ii in ag if !(get(PAR[:gamma_T], ii, 0.0) > 0.0)]
+    @constraint(model, F_16[ii in ag_land],
         (Ts[ii]) - (Td[ii]) ⟂ NPT[ii])
+    @constraint(model, F_16_noland[ii in ag_noland],
+        (NPT[ii]) - (1.0) ⟂ NPT[ii])
 
     # ── (F-17) Gross land price = net price × (1 + land tax) ─────────────────
     @constraint(model, F_17[ii in ag],
