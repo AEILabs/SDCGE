@@ -35,10 +35,12 @@
 #   a genuine downward-sloping-demand market-clearing condition on TW.
 #
 # :fixed_wage (the previous behaviour, kept for reference/back-compat)
-#   F-12 pins W[l,i] = 1 and the wage level is then determined by the chain
-#   F-4 (AVGW = mean of NW) -> F-6_segmented (TW = AVGW) -> F-11 (NW = phi·TW),
-#   which is CIRCULAR: substituting gives AVGW·1e-9 = 0, so the nominal net wage
-#   is pinned only through the 1e-9 guard inside F-4.  On top of that
+#   F-12 pins W[l,i] = 1.  Until 2026-10-04 the NET wage was then determined by
+#   the chain F-4 (AVGW = mean of NW) -> F-6_segmented (TW = AVGW) -> F-11
+#   (NW = phi·TW), which is CIRCULAR: substituting gives AVGW·1e-9 = 0, so the
+#   net wage — what Y-3 pays households — was pinned only through the 1e-9
+#   guard inside F-4, and labour income drifted away from labour cost (see
+#   F-6 below).  F-6 now anchors TW = 1 instead.  On top of that
 #   F-7_segmented is (TW − WMIN)·UE = 0 ⟂ UE with TW ≡ WMIN ≡ 1, a complementarity
 #   satisfied with zero gradient either way.  Together these leave a
 #   near-singular direction that PATH handles badly as soon as the state moves
@@ -225,8 +227,20 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # ── (F-6) National wage condition ─────────────────────────────────────
         @constraint(model, F_6_integrated[ll in migr_integrated],
             ((TW[ll,"national"] - WMIN[ll,"national"]) * UE[ll,"national"]) - 0.0 ⟂ UE[ll,"national"])
-        @constraint(model, F_6_segmented[ll in migr_segmented],
-            (TW[ll,"national"]) - (AVGW[ll,"national"]) ⟂ TW[ll,"national"])
+        # The net wage is the fixed one (fixed 2026-10-04).  This used to read
+        # TW = AVGW, and with F-4 (AVGW = employment-weighted mean of NW) and F-11
+        # (NW = phi·TW) that is TW·1e-9/(ΣLV + 1e-9) = 0: a zero row, so TW — and
+        # with it NW, the wage HOUSEHOLDS are paid in Y-3 — was set by nothing
+        # while firms paid W = 1.  Labour income and labour cost then drifted
+        # apart wherever PATH happened to stop: on data/KEN_2023_hybrid133 a 20 %
+        # tariff cut landed at TW = 1.127/0.789 (unskilled/skilled) in every other
+        # period, the household lost 0.22 % of the wage bill, C-9 (dropped under
+        # :bop, the Walras'-law check) missed by 0.6 % of investment, and real GDP
+        # zig-zagged +3.24/+2.37/+3.20/+2.31 % on a path whose exogenous state is
+        # identical every period.  The fixed wage is now the net wage TW = 1, and
+        # F-12 below derives the employer wage from it in both closures.
+        @constraint(model, F_6_wage_anchor[ll in migr_segmented],
+            (TW[ll,"national"]) - (1.0) ⟂ TW[ll,"national"])
 
         # ── (F-7) Zone-specific wage condition ────────────────────────────────
         @constraint(model, F_7_integrated[ll in migr_integrated, gg in gs],
@@ -281,7 +295,10 @@ function add_factor_equations!(model, data::LinkageData, PAR)
         # ── (F-12) Producer wage anchored to numeraire ────────────────────────
         # All gross employer wages W[ll,ii] are fixed at 1. This pins the absolute
         # wage level across all skills and sectors, breaking the price homogeneity
-        # of the CGE system. NW (net wages) is then determined by F_11 from TW.
+        # of the CGE system. NW (net wages) is then determined by F_11 from TW,
+        # which F-6 anchors at 1: with the calibrated phi_wage = 1 and tau_l = 0
+        # (no SAM payroll-tax account) NW = W, i.e. households are paid exactly
+        # the wage bill firms pay.
         # Payroll tax revenue in C_3 still uses tau_l × NW × labor demand.
         @constraint(model, F_12[ll in l, ii in i],
             (W[ll,ii]) - (1.0) ⟂ W[ll,ii])
@@ -381,8 +398,15 @@ function add_factor_equations!(model, data::LinkageData, PAR)
             (sum(Kvd[ii,vv] for ii in i for vv in v) +
              sum(Nfirm[ii]*KF_d[ii] for ii in i)) - (KS) ⟂ TR)
     else
-        @constraint(model, F_21_cet_capital,
-            (TR - (sum(PAR[:gamma_K][ii] * R[ii,"Old"]^(1 + PAR[:omega_K]) for ii in i))^(1/(1 + PAR[:omega_K]))) - 0.0 ⟂ TR)
+        # :fixed_wage — capital is in perfectly elastic supply (F-25 defines KS as
+        # total demand), so its price has to be set, and the CET dual above it
+        # used to be the zero row described in the NOTE.  Pinned at its benchmark
+        # value instead (fixed 2026-10-04).  Every solve that kept TR = 1 (the
+        # benchmark, every GTAP 12 run measured) is unchanged; what goes is the
+        # free direction: a +20 % foreign-saving shock on data/KEN_2023_hybrid133
+        # landed at TR = 1.07, 0.98 or 1.13 depending only on the SAM's units,
+        # each "LOCALLY_SOLVED" with C-9 missing by 2-17 % of investment.
+        @constraint(model, F_21_fixed_return, (TR - 1.0) - 0.0 ⟂ TR)
     end
 
     # ── (F-22) Sectoral capital-market equilibrium ────────────────────────────
