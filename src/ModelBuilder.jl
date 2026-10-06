@@ -53,9 +53,21 @@ function prepare_data!(data::LinkageData=init_data();
         balance::Symbol=:ras,
         calibrate::Bool=true,
         precompute::Bool=true,
+        unemployment_path::Union{Nothing,AbstractString}=nothing,
         outdir::Union{Nothing,AbstractString}="results")
 
     data.par[:trade_closure] = trade_closure
+    # Benchmark unemployment rates by skill (`labour,rate` rows), which a SAM cannot carry:
+    # `unemployment_path`, else an `unemployment.csv` next to a CSV SAM (the CGE-SAMs exports
+    # write one).  Stored in data.par[:ue_data]; used by `:wage_floor` (see
+    # set_benchmark_unemployment!), ignored by the other labour closures.
+    upath = unemployment_path !== nothing ? unemployment_path :
+            (source == :csv && sam_path !== nothing) ? joinpath(dirname(sam_path), "unemployment.csv") : nothing
+    if upath !== nothing && isfile(upath)
+        data.par[:ue_data] = read_unemployment_csv(upath)
+    elseif unemployment_path !== nothing
+        error("prepare_data!: unemployment_path $(unemployment_path) does not exist.")
+    end
     data.par[:bop_closure]   = bop_closure
     data.par[:inv_closure]   = inv_closure
     sets_path === nothing || read_sets_csv!(data, sets_path)
@@ -141,6 +153,12 @@ function build_linkage_model!(m, data::LinkageData)
     # Remembered so solve_model! can pick closure-dependent PATH options without
     # being handed `data` (see its `crash_method` default).
     m.ext[:labour_closure] = Symbol(get(PAR, :labour_closure, :full_employment))
+    # :wage_floor needs a benchmark unemployment rate: the database's (data.par[:ue_data],
+    # read by prepare_data!) unless set_benchmark_unemployment! has set one; once, so a
+    # recursive run's later periods keep the grown labour force.
+    if m.ext[:labour_closure] === :wage_floor && !get(PAR, :UE0_set, false)
+        _set_benchmark_unemployment!(PAR, data.sets, get(PAR, :ue_data, 0.0))
+    end
 
     add_variables!(m, data)
     initialize_from_sam!(m, data)

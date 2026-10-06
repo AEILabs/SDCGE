@@ -149,6 +149,9 @@ function precompute_parameters(data::LinkageData)
     # Labour-market closure (see the header of Factors.jl):
     #   :fixed_wage      — W = 1 and UE absorbs supply minus demand   (default)
     #   :full_employment — the wage TW clears sum_i LV = LS·(1-UE0)
+    #   :wage_floor      — TW ≥ WMIN ⟂ UE ≥ 0: unemployment absorbs demand at the floor
+    #                      wage, the wage clears once it is gone (needs :bop + :fixed_er;
+    #                      benchmark unemployment from unemployment.csv)
     # :full_employment is square, replicates the benchmark (0.0004 % on
     # data/KEN_2017_gtap11afr) and, unlike the default, turns a +10 % TFP shock
     # into higher output rather than higher unemployment.  It is still NOT the
@@ -323,27 +326,60 @@ function precompute_parameters(data::LinkageData)
 end
 
 """
-    set_benchmark_unemployment!(data, u)
+    set_benchmark_unemployment!(data, u) -> data
 
-PROTOTYPE (proto/wage-floor). Give the benchmark an unemployment rate `u` (0 <= u < 0.95)
-that the SAM cannot carry — a SAM records the wage bill of the employed only, so every
-calibrated benchmark has UE0 = 0 and labour demand equal to the labour force.  The labour
-force is scaled up to employment / (1 − u) (`LS0` in every zone, `LSupply`) and `UE0 = u`;
-employment, wages and every SAM flow are unchanged.  Call it after `prepare_data!` and
-before the first `model(data)`.  Under `:fixed_wage` it moves only `UE`; under
-`:full_employment` F-6 keeps employment at LS·(1 − UE0), i.e. at the benchmark; under
-`:wage_floor` it is the slack the economy can absorb at the floor wage before the wage rises.
+Give the benchmark an unemployment rate the SAM cannot carry: a SAM records the wage bill of
+the employed only, so every calibrated benchmark has `UE0 = 0` and labour demand equal to the
+labour force.  `u` is one rate for every skill or a `Dict` skill => rate (`"UnSkLab"`,
+`"SkLab"`; a skill not given keeps its rate), each in [0, 0.95).  The labour force is set to
+employment / (1 − u) (`LS0` in every zone, `LSupply`) and `UE0 = u`; employment, wages and
+every SAM flow are unchanged.  Idempotent (employment = LS0·(1 − UE0) is what stays fixed),
+so it can be called again with a different rate.
+
+Call it after `prepare_data!` and before the first `model(data)`.  Under `:wage_floor` it
+OVERRIDES the database's own rate (`unemployment.csv`, `data.par[:ue_data]`), which the first
+`:wage_floor` build applies otherwise; it is the slack the economy absorbs at the floor wage
+before the wage rises.  Under `:full_employment` employment stays at LS·(1 − UE0), the
+benchmark, so results do not change; under `:fixed_wage` only `UE` moves.  It mutates the
+parameter table, so build another closure from a fresh `prepare_data!` if the labour force
+must stay unscaled.
 """
-function set_benchmark_unemployment!(data::LinkageData, u::Real)
-    0.0 <= u < 0.95 || error("benchmark unemployment rate must be in [0, 0.95), got $u")
-    PAR = parameters(data)
-    S = data.sets
-    for ll in S[:l]
-        for gg in S[:gz]
-            PAR[:LS0][(ll, gg)] /= (1 - u)
-        end
-        PAR[:LSupply][ll] /= (1 - u)
-        PAR[:UE0][ll] = float(u)
-    end
+function set_benchmark_unemployment!(data::LinkageData, u)
+    _set_benchmark_unemployment!(parameters(data), data.sets, u)
     return data
+end
+
+function _set_benchmark_unemployment!(PAR, S, u)
+    for ll in S[:l]
+        u0 = float(get(PAR[:UE0], ll, 0.0))
+        uu = u isa Real ? float(u) : float(get(u, ll, u0))
+        0.0 <= uu < 0.95 || error("benchmark unemployment rate for $(ll) must be in [0, 0.95), got $(uu)")
+        k = (1 - u0) / (1 - uu)               # employment LS0·(1 − UE0) stays where it is
+        for gg in S[:gz]
+            PAR[:LS0][(ll, gg)] *= k
+        end
+        PAR[:LSupply][ll] *= k
+        PAR[:UE0][ll] = uu
+    end
+    PAR[:UE0_set] = true
+    return PAR
+end
+
+"""
+    read_unemployment_csv(path) -> Dict{String,Float64}
+
+Benchmark unemployment rates by skill from a two-column CSV with a header, `labour,rate`
+(rates as fractions; the CGE-SAMs exporter writes `UnSkLab` and `SkLab`).
+"""
+function read_unemployment_csv(path::AbstractString)
+    raw = readdlm(path, ',', Any, '\n')
+    hdr = lowercase.(strip.(string.(raw[1, :])))
+    il = findfirst(==("labour"), hdr); ir = findfirst(==("rate"), hdr)
+    (il === nothing || ir === nothing) && error("$(path): expected the columns labour,rate")
+    out = Dict{String,Float64}()
+    for k in 2:size(raw, 1)
+        lab = strip(string(raw[k, il])); isempty(lab) && continue
+        x = raw[k, ir]; out[lab] = x isa Real ? float(x) : parse(Float64, strip(string(x)))
+    end
+    return out
 end

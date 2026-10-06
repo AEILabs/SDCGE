@@ -160,6 +160,29 @@ using DataFrames
         @test abs(ks[2]/ks[1]     - 1) < 1e-6
         @test abs(yg[2]/yg[1]     - 1) < 1e-6
     end
+
+    # :wage_floor's benchmark unemployment (no PATH needed): the CSV reader, the default read
+    # next to a CSV SAM, and set_benchmark_unemployment! (idempotent: employment stays fixed).
+    @testset "benchmark unemployment" begin
+        tmp = mktempdir()
+        for f in ("sam.csv", "sets.csv"); cp(joinpath(@__DIR__, "..", "data", "csv", f), joinpath(tmp, f)); end
+        open(joinpath(tmp, "unemployment.csv"), "w") do io
+            println(io, "labour,rate"); println(io, "UnSkLab,0.07"); println(io, "SkLab,0.03")
+        end
+        @test read_unemployment_csv(joinpath(tmp, "unemployment.csv")) == Dict("UnSkLab" => 0.07, "SkLab" => 0.03)
+        du = prepare_data!(init_data(); sets_path=joinpath(tmp, "sets.csv"), source=:csv,
+                           sam_path=joinpath(tmp, "sam.csv"), outdir=nothing)
+        @test du.par[:ue_data] == Dict("UnSkLab" => 0.07, "SkLab" => 0.03)
+        Pu = parameters(du)
+        @test all(Pu[:UE0][ll] == 0.0 for ll in du.sets[:l])        # nothing applied before a :wage_floor build
+        emp(P, ll) = P[:LSupply][ll] * (1 - P[:UE0][ll])
+        e0 = Dict(ll => emp(Pu, ll) for ll in du.sets[:l])
+        set_benchmark_unemployment!(du, 0.10); set_benchmark_unemployment!(du, du.par[:ue_data])
+        @test all(isapprox(Pu[:UE0][ll], du.par[:ue_data][ll]) for ll in du.sets[:l])
+        @test all(isapprox(emp(Pu, ll), e0[ll]; rtol=1e-12) for ll in du.sets[:l])
+        @test all(isapprox(Pu[:LS0][(ll,"national")], e0[ll] / (1 - Pu[:UE0][ll]); rtol=1e-12) for ll in du.sets[:l])
+        @test_throws ErrorException set_benchmark_unemployment!(du, 0.97)
+    end
 end
 
 # ── Numeric regression: the default closure on a real database ───────────────
@@ -231,5 +254,67 @@ if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
             end
             @test nbad == 0
         end
+    end
+end
+
+# ── :wage_floor on a real database (needs PATH) ──────────────────────────────
+# KEN_2018_hybrid at the benchmark scale the simulator calibrates at (largest flow 1e5),
+# trade_closure = :bop, bop_closure = :fixed_er.  A null run reproduces the benchmark with 5 %
+# unemployment; a 0 % start is :full_employment exactly; the wage stays on its floor while a
+# skill has unemployment and rises once it has none; the :flex_er pairing is refused.
+if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
+    @testset "wage_floor closure (KEN_2018_hybrid)" begin
+        ken_sam  = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sam.csv")
+        ken_sets = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sets.csv")
+        function prep(bop)
+            d = prepare_data!(init_data(); sets_path=ken_sets, source=:csv, sam_path=ken_sam, balance=:none,
+                              outdir=nothing, bop_closure=bop, calibrate=false, precompute=false)
+            sc = 1e5 / maximum(abs, d.balanced_sam); d.balanced_sam .*= sc; d.sam === d.balanced_sam || (d.sam .*= sc)
+            LinkageModel.calibrate_from_sam!(d); d.metadata[:PAR] = LinkageModel.precompute_parameters(d)
+            return d
+        end
+        function solve_closure(closure; u=nothing, tm=1.0, bop=:fixed_er)
+            d = prep(bop); P = parameters(d); P[:labour_closure] = closure
+            u === nothing || set_benchmark_unemployment!(d, u)
+            for k in keys(P[:tau_m]); P[:tau_m][k] *= tm; end
+            m = model(d; show_solver_output=false)
+            solve_model!(m; output="no", show_diagnostics=false)
+            @test termination_status(m) == JuMP.LOCALLY_SOLVED
+            return m, d
+        end
+        L = ["UnSkLab", "SkLab"]
+        ue(m, ll) = value(m[:UE][ll, "national"])
+        floorgap(m, ll) = value(m[:TW][ll, "national"]) / value(m[:WMIN][ll, "national"]) - 1
+
+        # refused without a fixed exchange rate
+        dflex = prep(:flex_er); parameters(dflex)[:labour_closure] = :wage_floor
+        @test_throws ErrorException model(dflex; show_solver_output=false)
+
+        # null run: the benchmark, with 5 % unemployment at the floor wage
+        m, d = solve_closure(:wage_floor; u=0.05)
+        xp0 = parameters(d)[:bench][:XP]
+        @test maximum(abs(value(m[:XP][ii]) / xp0[ii] - 1) for ii in d.sets[:i] if xp0[ii] > 1e-9) < 1e-5
+        @test all(isapprox(ue(m, ll), 0.05; atol=1e-8) for ll in L)
+        @test all(abs(floorgap(m, ll)) < 1e-8 for ll in L)
+
+        # 0 % start = :full_employment (20 % tariff cut)
+        mf, df = solve_closure(:full_employment; tm=0.8)
+        mw, dw = solve_closure(:wage_floor; u=0.0, tm=0.8)
+        @test isapprox(value(mw[:RGDP]["R1"]), value(mf[:RGDP]["R1"]); rtol=1e-8)
+        @test maximum(abs(value(mw[:XP][ii]) / value(mf[:XP][ii]) - 1) for ii in dw.sets[:i] if value(mf[:XP][ii]) > 1e-6) < 1e-7
+        @test all(abs(floorgap(mw, ll) - floorgap(mf, ll)) < 1e-7 for ll in L)
+
+        # the regime switch: 5 % start, 20 % tariff cut -> unemployment falls, wage at the floor;
+        # 2 % start, zero tariffs -> unskilled unemployment exhausted and its wage above the floor,
+        # skilled still unemployed at the floor
+        m5, _ = solve_closure(:wage_floor; u=0.05, tm=0.8)
+        @test all(1e-4 < ue(m5, ll) < 0.05 for ll in L)
+        @test all(abs(floorgap(m5, ll)) < 1e-8 for ll in L)
+        m2, _ = solve_closure(:wage_floor; u=0.02, tm=0.0)
+        @test ue(m2, "UnSkLab") < 1e-7 && floorgap(m2, "UnSkLab") > 1e-4
+        @test ue(m2, "SkLab") > 1e-4 && abs(floorgap(m2, "SkLab")) < 1e-8
+        println("wage_floor: 5 % start, -20 % tariffs: UE ", round.([ue(m5, ll) for ll in L]; digits=4),
+                "; 2 % start, zero tariffs: UE ", round.([ue(m2, ll) for ll in L]; digits=4),
+                ", TW/WMIN - 1 ", round.([floorgap(m2, ll) for ll in L]; sigdigits=3))
     end
 end

@@ -48,6 +48,32 @@
 #   in LS only raises UE, which enters no other active equation), and 10-period
 #   growth runs failed with ITERATION_LIMIT in 7 of 10 periods.
 #
+# :wage_floor (2026-10-06; branch wage-floor) — the LINKAGE minimum-wage regime as a
+#   proper complementarity.  Per skill l:
+#     (F-6)  sum_i (LV[l,i] + N_i·LF_d[l,i]) = LS[l,"national"]·(1 − UE[l,"national"])
+#                                                        ⟂ TW[l,"national"]
+#     (F-7)  TW[l,z]   = TW[l,"national"]                           ⟂ TW[l,z]
+#     (F-9)  WMIN[l,z] = chi_wmin·PS^omega_ps·PABS^omega_p  (= 1, the benchmark wage)
+#                                                                  ⟂ WMIN[l,z]
+#     (F-10) TW[l,"national"] − WMIN[l,"national"] ≥ 0   ⟂   UE[l,"national"] ≥ 0
+#            UE[l,z] = UE[l,"national"]                             ⟂ UE[l,z]
+#   so the net wage sits on its floor while there is unemployment (employment adjusts,
+#   as under :fixed_wage) and rises once labour demand reaches the labour force (the wage
+#   clears, as under :full_employment).  The benchmark needs unemployment for the first
+#   regime to exist: `UE0` per skill from the database's `unemployment.csv` (read by
+#   prepare_data!, applied by the first :wage_floor build) or set_benchmark_unemployment!
+#   (an override); the labour force is employment / (1 − UE0).  With UE0 = 0 the floor and
+#   the full-employment cap coincide at the benchmark and an expansion is priced exactly as
+#   under :full_employment.  Capital clears on TR (F-21), old capital is putty-clay (F-24),
+#   W = (1+tau_l)·NW (F-12), zero-endowment sectors take the fixed-real-price NR branch and
+#   the numeraire is PABS — all the :full_employment machinery — so it is refused unless
+#   trade_closure = :bop and bop_closure = :fixed_er.  Measured on Kenya 2023 (GTAP 12, SAM
+#   at the benchmark scale, the database's 5.2 % / 8.2 % unemployment): -20 % tariffs real
+#   GDP +1.12 % (unemployment 3.4 % / 6.5 %, wage at the floor), zero tariffs +5.2 %
+#   (unemployment 0, the wage above the floor); with bop_closure = :flex_er the same cut
+#   gives -4.3 % and unemployment 13 % (the nominal floor and CPI = 1 fix the real
+#   consumer wage) and zero tariffs does not converge.
+#
 # NUMERAIRE (PAR[:numeraire]).  Under :fixed_wage, W = 1 (F-12) is the de facto
 # numeraire — labour is 29 % of output, so it carries the whole cost chain.
 # Under :full_employment W is endogenous and one absolute condition has to take
@@ -144,15 +170,9 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     labour_closure in (:full_employment, :fixed_wage, :wage_floor) ||
         error("Unknown PAR[:labour_closure] = $(labour_closure); " *
               "use :full_employment, :fixed_wage or :wage_floor.")
-    # :wage_floor (PROTOTYPE, branch proto/wage-floor): the LINKAGE minimum-wage
-    # regime as a proper complementarity.  Labour clears with unemployment,
-    #     Σ_i LV[l,i] = LS[l]·(1 − UE[l])                        ⟂ TW[l]
-    #     TW[l] − WMIN[l] ≥ 0   ⟂   UE[l] ≥ 0                     (F-10)
-    # so the wage sits on its floor WMIN (= the benchmark wage, chi_wmin = 1)
-    # while there is unemployment and rises once demand reaches the labour force.
-    # Everything else — capital clearing on TR, putty-clay F-24, the NR routing,
-    # W = (1+tau_l)·NW, the numeraire — is the :full_employment machinery, so it
-    # has the same requirement: bop_closure = :fixed_er.
+    # :wage_floor — see the header: labour clears WITH unemployment against a wage floor,
+    # TW ≥ WMIN ⟂ UE ≥ 0; capital, F-24, the NR routing, F-12 and the numeraire are the
+    # :full_employment machinery.
     wage_floor = labour_closure === :wage_floor
     full_employment = labour_closure === :full_employment
     # `market` = the wage is a price (it clears, or can clear, the labour market).
@@ -166,12 +186,25 @@ function add_factor_equations!(model, data::LinkageData, PAR)
     # them pinned the bundled synthetic SAM's period-2 baseline no longer replicates and +2 %
     # TFP lands anywhere between −8 % and −48 % of real GDP.  :balanced keeps the original
     # equations, byte-identical.
-    fw_anchor = !full_employment && Symbol(get(PAR, :trade_closure, :bop)) !== :balanced
+    fw_anchor = !market && Symbol(get(PAR, :trade_closure, :bop)) !== :balanced
+
+    # :wage_floor is supported only with the balance-of-payments trade closure and a fixed
+    # real exchange rate (see the header for the measurements behind this): refuse the rest.
+    if wage_floor
+        tc = Symbol(get(PAR, :trade_closure, :bop)); bc = Symbol(get(data.par, :bop_closure, :flex_er))
+        (tc === :bop && bc === :fixed_er) ||
+            error("PAR[:labour_closure] = :wage_floor needs trade_closure = :bop and bop_closure = " *
+                  ":fixed_er (got $(tc), $(bc)): with a flexible exchange rate the nominal wage " *
+                  "floor and the CPI numeraire fix the real consumer wage, and a tariff cut then " *
+                  "RAISES unemployment (Kenya 2023, -20 % tariffs: real GDP -4.3 %, unemployment " *
+                  "5 % -> 13 %; zero tariffs does not converge).  Prepare the data with " *
+                  "prepare_data!(...; trade_closure = :bop, bop_closure = :fixed_er).")
+    end
 
     # :full_employment needs a nominal anchor and only the trade closure can give
     # it one (see the NUMERAIRE section of the header).  Warn rather than error so
     # the pre-2026-09-14 combination can still be reproduced.
-    if market && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
+    if full_employment && Symbol(get(data.par, :bop_closure, :flex_er)) !== :fixed_er
         @warn string("PAR[:labour_closure] = :full_employment with bop_closure = ",
                      get(data.par, :bop_closure, :flex_er),
                      ": the model is then homogeneous of degree one in every nominal ",

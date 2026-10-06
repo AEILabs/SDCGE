@@ -383,7 +383,8 @@ function initialize_from_sam!(model, data::LinkageData)
             ls_nat = max(get(PAR[:LS0], (ll,"national"), 1.0), 1.0e-9)
             ld_nat = sum(get(PAR[:LV0], (ll,ii), 0.0) for ii in i)
             ue_nat = clamp(1.0 - ld_nat/ls_nat, LCGE_UE_START, LCGE_UE_MAX)
-            ue_gs  = LCGE_UE_START
+            # :wage_floor ties the zones to the national rate (F-10 zone equations)
+            ue_gs  = get(PAR, :labour_closure, :fixed_wage) === :wage_floor ? ue_nat : LCGE_UE_START
         end
         for gg in gz
             _safe_start_value!(model, :LS,   (ll,gg), get(PAR[:LS0], (ll,gg), 1.0))
