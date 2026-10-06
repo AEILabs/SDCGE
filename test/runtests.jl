@@ -394,3 +394,37 @@ end
                 ", -20 % tariffs ", round(c9(mt); sigdigits=2))
     end
 end
+
+# ── An intermediate-input tax on a sector without intermediate inputs ────────────────────────
+# Four 133-sector hybrids (Kyrgyzstan, Laos, Nepal, Pakistan 2023) book TAX_INT on activities
+# whose COM x ACT column is empty; tau_Ap = txi/EPS (~1e11) left C-3 ~1e6 off at the start point
+# and none of their benchmarks solved.  The tax is now an output tax of that sector.  Built from
+# the 12-sector synthetic economy: sector "trd" buys its intermediates no more (their cost goes
+# to capital, the goods to household consumption), but keeps its input tax.
+@testset "input tax without intermediate inputs" begin
+    d = init_data()
+    d.sets[:i]  = ["pdr","wht","gro","ctl","oap","coa","oil","ely","chm","tex","trd","osg"]
+    d.sets[:cr] = ["pdr","wht","gro"]; d.sets[:lv] = ["ctl","oap"]; d.sets[:e] = ["coa","oil","ely"]
+    d.sets[:ft] = ["chm"]; d.sets[:fd] = ["wht","gro"]; d.sets[:r] = ["R1"]
+    prepare_data!(d; outdir=nothing, calibrate=false, precompute=false)
+    M = d.balanced_sam; ix = d.sam_index; a = ix["ACT_trd"]; iset = d.sets[:i]
+    Δ = zeros(size(M))
+    for p in iset
+        c = ix["COM_"*p]; x = M[c, a]
+        Δ[c, a] -= x; Δ[ix["CAP"], a] += x; Δ[ix["HH"], ix["CAP"]] += x; Δ[c, ix["HH"]] += x
+    end
+    M .+= Δ; d.sam === M || (d.sam .+= Δ)
+    txi = M[ix["TAX_INT"], a]; txo = M[ix["TAX_OUT"], a]
+    @test txi > 0 && sum(M[ix["COM_"*p], a] for p in iset) == 0
+    calibrate_from_sam!(d); d.metadata[:PAR] = precompute_parameters(d)
+    P = parameters(d); X = P[:bench][:XP]["trd"]
+    @test all(P[:tau_Ap][(p, "trd")] == 0 for p in iset)
+    @test isapprox(P[:tau_p]["trd"] * X / (1 + P[:tau_p]["trd"]), txo + txi; rtol=1e-12)
+    if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
+        m = model(d; show_solver_output=false)
+        solve_model!(m; output="no", show_diagnostics=false)
+        @test termination_status(m) == JuMP.LOCALLY_SOLVED
+        @test maximum(abs(value(m[:XP][p]) / P[:bench][:XP][p] - 1) for p in iset) < 1e-4
+        @test isapprox(value(m[:YG]), P[:bench][:YG]; rtol=1e-6)
+    end
+end

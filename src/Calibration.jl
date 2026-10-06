@@ -190,6 +190,16 @@ function calibrate_from_sam!(data::LinkageData)
     end
 
     interm = Dict(p => sum(IOc[(jj,p)] for jj in i) for p in i)
+    # An intermediate-input tax paid by a sector that buys no intermediate inputs (TAX_INT x
+    # ACT > 0 with an empty COM x ACT column; four 133-sector hybrids, 2026-10-06) cannot be a
+    # rate on those inputs: tau_Ap = txi/EPS ~ 1e11 put ~1e6 into C-3 at the start point and
+    # moved the tax into the value-added nest (P-2), so the benchmark never solved.  It is
+    # booked as an output tax instead: the same revenue and the same activity cost.
+    for p in i
+        if txi[p] > 0.0 && interm[p] <= EPS
+            txo[p] += txi[p]; txi[p] = 0.0
+        end
+    end
     X      = Dict(p => interm[p] + uld[p] + sld[p] + cap[p] + lnd[p] + nrs[p] +
                        txo[p] + txi[p] for p in i)
     for p in i; X[p] = max(X[p], EPS); end
