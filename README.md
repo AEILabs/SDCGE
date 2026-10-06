@@ -368,6 +368,64 @@ GDP by 6–11 % (Kenya, Benin, South Africa, synthetic SAM): the extra governmen
 saving is not invested and, with fixed wages, demand falls. The comparison is in
 `~/Documents/Data/CGE/validation/sdcge_branch_check/inv_closure_comparison.txt`.
 
+### Labour closures
+
+`parameters(data)[:labour_closure]`, set after `prepare_data!` and before `model(data)`:
+
+| closure | wage | unemployment | capital | needs |
+|---|---|---|---|---|
+| `:fixed_wage` (default) | `W = 1` | absorbs supply − demand; labour demand is **uncapped** | perfectly elastic at `TR = 1` | any trade closure |
+| `:full_employment` | clears the labour market | fixed at its benchmark rate | clears on `TR` (stock exogenous) | `bop_closure = :fixed_er` (warns otherwise) |
+| `:wage_floor` | at its floor `WMIN` (the benchmark wage) while there is unemployment, rises once there is none | `TW ≥ WMIN ⟂ UE ≥ 0`, starting from the database's rate | clears on `TR` | `trade_closure = :bop`, `bop_closure = :fixed_er` (errors otherwise) |
+
+```julia
+data = prepare_data!(init_data(); source=:csv, sam_path=…, sets_path=…, bop_closure = :fixed_er)
+parameters(data)[:labour_closure] = :wage_floor
+# optional override of the database's benchmark unemployment (one rate, or by skill):
+set_benchmark_unemployment!(data, Dict("UnSkLab" => 0.08, "SkLab" => 0.04))
+```
+
+`:wage_floor` is the LINKAGE minimum-wage regime: labour clears with unemployment
+(F-6: `Σ LV = LS·(1 − UE)` ⟂ `TW`) and F-10 is the complementarity `TW − WMIN ≥ 0 ⟂ UE ≥ 0`, so an
+expansion first hires the unemployed at the benchmark wage and raises the wage only once a skill's
+unemployment is exhausted; a contraction raises unemployment at the floor. A SAM records only the
+employed, so the benchmark unemployment rate comes from data: `prepare_data!` reads
+`unemployment.csv` (`labour,rate`, UnSkLab/SkLab) next to a CSV SAM — the country databases from
+`~/Documents/Data/CGE` carry the ILO modelled 2023 rate, split by skill from labour-force surveys —
+and the first `:wage_floor` build applies it (labour force = employment / (1 − u)); without a file
+the rate is 0, and `set_benchmark_unemployment!` overrides it. With a 0 % start the closure is
+`:full_employment` (tested to 1e-8). Capital, the old vintage, `W = (1+τ_l)·NW`, the
+natural-resource routing and the numeraire are `:full_employment`'s, so it needs a fixed real
+exchange rate: under `:flex_er` the nominal floor and the CPI numeraire pin the real consumer wage,
+and a 20 % tariff cut on Kenya 2023 *lowers* real GDP 4.3 % with unemployment rising from 5 % to
+13 % (zero tariffs does not converge). The first `:wage_floor` build scales the labour force in the
+parameter table; build another closure from a fresh `prepare_data!` if it must stay unscaled.
+
+Batch on the 333 country databases (2026-10-06; SAM at the simulator's benchmark scale, largest
+flow 1e5; `~/Documents/Data/CGE/validation/sdcge_closure_check/`): real GDP (ΣXP) against each
+closure's own benchmark, median [90th percentile, maximum] over the solved cases.
+
+| | benchmark solves | −20 % tariffs | zero tariffs |
+|---|---|---|---|
+| `:fixed_wage` (`:flex_er`) | 324 | 312: +0.53 % [3.4 %, 61 %] | 287: +2.6 % [17 %, 145 %]; labour demand above the labour force in 274 (median 2.8 %, up to 153 %) |
+| `:full_employment` (`:fixed_er`) | 311 (321) | 310 (318): +0.06 % [0.35 %, 2.3 %] | 296 (305): +0.29 % [1.6 %, 12 %] |
+| `:wage_floor` (`:fixed_er`, database rates) | 312 (321) | 310 (320): +0.15 % [0.83 %, 3.9 %] | 298 (308): +0.68 % [3.0 %, 13 %] |
+
+In brackets: solved when a failed solve is retried with the SAM at its own scale (the 1e5
+normalisation that rescues `:fixed_wage` puts the two market-clearing closures' benchmark
+residuals, ~5e-6, above PATH's absolute 1e-6, so PATH has to move on a near-singular Jacobian;
+at the raw scale the start point already passes; where both solve, real GDP agrees to 1e-5
+points). Paired, `:wage_floor` is never below `:full_employment` and is below `:fixed_wage` in
+92 % (−20 %) / 96 % (zero tariffs) of the databases where all three solve. After zero tariffs
+both skills are still unemployed at the floor wage in 241 databases, one skill has reached full
+employment in 41 and both in 16. Kenya 2023 (database rates 5.2 % / 8.2 %): −20 % tariffs
++1.12 %, zero tariffs +5.2 % (unemployment 0, wage +20 %); its 133-sector hybrid +2.6 %; South
+Africa +1.9 %, Cameroon +2.3 % (fixed wage: +73 %). A three-period run on Kenya keeps
+unemployment and the wage flat across periods (no zig-zag). Non-convergence is shared with
+`:full_employment`: no benchmark fails under `:wage_floor` that solves under it; nine databases
+fail under every closure (no crop land in GTAP 12: Hong Kong, Mauritius, Iceland's hybrid; and
+the 133-sector hybrids of Kyrgyzstan, Laos, Nepal, Pakistan).
+
 The data pipeline in `~/Documents/Data/CGE` ships each country with `sam.csv`
 (the real SAM, for `:bop`) and `sam_balanced_trade.csv` (pre-balanced good by
 good, for `:balanced`).
@@ -376,7 +434,8 @@ good, for `:balanced`).
 
 ## Known limitations
 
-- **Labour closure.** The default regime (`parameters(data)[:labour_closure]
+- **Labour closure.** (`:wage_floor`, above, is the supported alternative that respects the
+  labour force; the notes below predate it.) The default regime (`parameters(data)[:labour_closure]
   = :fixed_wage`) fixes the wage `W` at 1 and lets unemployment `UE` absorb
   any gap between labour supply and demand (F-10); F-4, F-6, F-7 and F-11 are
   circular/degenerate in this regime, so once `UE` leaves its bound PATH
