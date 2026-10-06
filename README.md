@@ -40,6 +40,13 @@ The model is written as a square **mixed complementarity problem (MCP)** in
   (median 1.2 %; production-nest residuals of tiny activities). The 2017 GTAP Africa V3 and 2018
   hybrid databases cited in older notes (e.g. `KEN_2017_gtap11afr`) are no longer exported;
   regenerate one with `Rscript R/09_export_sdcge.R gtap11afr 2017 KEN` if needed.
+- **The savings–investment account closes on every database** (2026-10-06). Government revenue
+  `YG` may be negative (see "Calibration conventions"): on 11 remittance-heavy SAMs (Lebanon,
+  Syria, Kyrgyzstan, Tajikistan, Nepal, Comoros, Somalia, Iran, Togo) the benchmark needs it,
+  and the solved benchmark used to miss C-9 by up to 25.7 × investment; it is now within 2e-8.
+  The 133-sector hybrids of Kyrgyzstan, Laos, Nepal and Pakistan, which no closure solved, now
+  solve their benchmark under all three labour closures, and a −20 % tariff run under all three
+  (Nepal: not under `:full_employment`).
 - **The benchmark replicates**: every equation holds at the calibrated start
   values, PATH reports `LOCALLY_SOLVED` after one major iteration (≈4 s).
 - Recursive dynamics keep an explicit capital stock (`Kstock0 = I0/δ`,
@@ -320,6 +327,27 @@ equations need, are documented in the header of `Calibration.jl`:
   reassigned to capital.
 - **Subsistence quantities `theta = 0`** (LES collapses to proportional
   budget shares); trade margins are zero at the benchmark (`zeta_t = 0`).
+- **Institutions and government revenue** (convention (6) in the header). The SAM's
+  institution block is not read cell by cell: final demand, factor income, the activity and
+  trade taxes and the trade deficit are, and household saving is the macro residual, which a
+  balanced SAM makes zero. The direct-tax rate `kappa_h` therefore takes whatever households
+  do not consume, all domestic saving except depreciation (`DeprY = 0.05·KY`) is government
+  saving, and the benchmark revenue is `YG0 = Tother + FDtax_H + S_H − DeprY0`
+  (= `G + I − DeprY0 − Sf0`), with `S_H` the SAM's household saving. Transfers (`HH`/`GOV` ×
+  `ROW`, `HH` × `GOV`, …) are folded in the same way: a remittance is part of the trade
+  deficit and of what households spend. Where households dissave in the SAM, `kappa_h < 0` is
+  a net transfer to households (38 of the 333 2023 databases), and where it exceeds every
+  other tax, `YG0 < 0` — 11 databases: Lebanon (`gtap12` −25.7 × investment, `hybrid133`
+  −22.6), Syria −3.0, Kyrgyzstan −2.1, Comoros `hybrid133` −0.62, Tajikistan −0.39, Nepal
+  `hybrid133` −0.26, Somalia `hybrid`/`hybrid133` −0.26, Iran `hybrid133` −0.11, Togo −0.03.
+  `YG` is a free variable since 2026-10-06; until then it was bounded at 1e-8 and the solved
+  benchmark of those 11 missed C-9 by `YG0` (the real solution was unaffected under `:bop`
+  with fixed investment, which drops C-9; under `inv_closure = :savings` investment did not
+  replicate).
+- **An input tax on a sector that buys no intermediate inputs** (`TAX_INT` × `ACT` with an
+  empty `COM` × `ACT` column) is booked as that sector's output tax: as a rate on inputs it
+  would be `txi/1e-9`. Four 133-sector hybrids (Kyrgyzstan, Laos, Nepal, Pakistan 2023) carry
+  one; their benchmarks failed under every closure until 2026-10-06.
 
 ---
 
@@ -424,7 +452,8 @@ Africa +1.9 %, Cameroon +2.3 % (fixed wage: +73 %). A three-period run on Kenya 
 unemployment and the wage flat across periods (no zig-zag). Non-convergence is shared with
 `:full_employment`: no benchmark fails under `:wage_floor` that solves under it; nine databases
 fail under every closure (no crop land in GTAP 12: Hong Kong, Mauritius, Iceland's hybrid; and
-the 133-sector hybrids of Kyrgyzstan, Laos, Nepal, Pakistan).
+the 133-sector hybrids of Kyrgyzstan, Laos, Nepal, Pakistan — these four solve since the
+2026-10-06 input-tax fix, see "Calibration conventions"; the table predates it).
 
 The data pipeline in `~/Documents/Data/CGE` ships each country with `sam.csv`
 (the real SAM, for `:bop`) and `sam_balanced_trade.csv` (pre-balanced good by
@@ -480,6 +509,15 @@ good, for `:balanced`).
   (land supply becomes demand-determined: +141 % on KEN). See the `Factors.jl`
   header for the measurements and for the closure experiment that was tried and
   rejected.
+- **Household and government saving are not the SAM's.** The calibration sets household saving
+  to zero and lets the direct tax `kappa_h` hand all other domestic saving to the government
+  ("Calibration conventions"), so `SAV`, `Sg`, `YG` and `kappa_h` do not match the SAM's
+  institution accounts (their sum does). Remittances, aid and foreign borrowing are all in
+  foreign saving. Where `kappa_h < 0` the implied transfer to households is proportional to
+  their factor income, so household consumption moves `1 − kappa_h` times as much as factor
+  income (Lebanon 2.1×, Kyrgyzstan 3.1×) instead of resting on a lump-sum remittance. Reading
+  the SAM's household saving needs Y-8/D-3's double subtraction of `SAV` (`YD = C + 2·SAV`)
+  removed first, and changes every database.
 - **Vintages carry no technology**: `Calibration.jl` gives Old and New capital
   identical shares and prices, so the dynamic update keeps the benchmark
   Old/New split (`vintage_rule=:benchmark_shares`); the flow-based split
