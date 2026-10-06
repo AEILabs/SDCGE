@@ -91,6 +91,38 @@
 #     disinvestment schedule.  Under :fixed_wage F-24 still pins RR = 1, which
 #     together with F-23/F-30 forces Kvd[p,"Old"] = K0[p] exactly.  Both give
 #     RR = 1 and the same solution at the benchmark.
+# (6) INSTITUTIONS AND GOVERNMENT REVENUE (2026-10-06).  The SAM's institution
+#     block is not read cell by cell.  Section 6 below takes C, G, I (COM x
+#     HH/GOV/INV), factor income, the activity and trade taxes (Tother) and the
+#     trade deficit (Sf0), and derives the rest:
+#       SAV0 = FactorInc + Tother + Sf0 - I - C - G, which a balanced SAM makes
+#         zero identically (floored at 1e-6): the SAM's own household and
+#         government saving (INV x HH/GOV, HH/GOV x INV) are not used.  (Y-8 and
+#         D-3 both subtract SAV, so YD = C + 2 SAV and C-9 is consistent with the
+#         household budget only because SAV ~ 0; reading the SAM's household
+#         saving would need that fixed first.)
+#       kappa_h = 1 - (C + 2 SAV0)/YH0: the direct tax takes whatever households
+#         do not consume, so all domestic saving except DeprY0 is government saving
+#         and the benchmark revenue is, to 1e-10 on every database,
+#           YG0 = Tother + kappa_h·YH0 = Tother + FDtax_H + S_H - DeprY0
+#         with S_H the SAM's household saving (INV x HH - HH x INV), FDtax_H the
+#         final-demand tax households pay (TAX_OUT x HH, unread) and
+#         DeprY0 = 0.05·KY0.  Equivalently YG0 = G + I - DeprY0 - Sf0.
+#       Transfers (HH/GOV x ROW, ROW x HH/GOV, HH x GOV, GOV x HH) are not read
+#         either: a transfer from abroad is part of the trade deficit and of what
+#         the receiving household spends, so it ends up in Sf0 and kappa_h, and the
+#         benchmark still reproduces the SAM.  The country SAMs exported by the
+#         data pipeline carry none (GTAP books remittances and aid in S - I = X - M).
+#     Where households dissave in the SAM (consumption financed by remittances, aid
+#     and foreign borrowing, all inside Sf0), kappa_h < 0 is a net transfer to
+#     households (38 of the 333 2023 databases), and where that transfer exceeds
+#     Tother + FDtax_H, YG0 < 0 (11 of them: when the trade deficit exceeds
+#     G + I - DeprY0; Lebanon gtap12 YG0 = -25.7 x investment).  YG is therefore a
+#     free variable (Variables.jl).  Until 2026-10-06 it was bounded at 1e-8: C-3
+#     then held only as an inequality at that floor, Sg missed its calibrated value
+#     by -YG0, and the solved benchmark missed C-9 by YG0 (dropped under :bop, so
+#     the real solution was unaffected; under inv_closure = :savings or
+#     trade_closure = :balanced the benchmark investment did not replicate).
 
 # Benchmark elasticities.  The SAM carries no elasticity information, so every
 # nest uses the same value; it is written into `par` (and therefore overrides the

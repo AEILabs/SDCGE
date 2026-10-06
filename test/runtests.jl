@@ -318,3 +318,79 @@ if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
                 ", TW/WMIN - 1 ", round.([floorgap(m2, ll) for ll in L]; sigdigits=3))
     end
 end
+
+# ── Negative government revenue: households that consume more than they earn ─────────────────
+# Calibration.jl convention (6).  The 12-sector synthetic economy plus a remittance R from
+# abroad (an HH x ROW transfer) that households spend on imports, sized so that the calibrated
+# revenue YG0 = Tother + kappa_h·YH0 is -0.5 x investment: kappa_h < 0 is a net transfer larger
+# than every other tax, the case of Lebanon, Syria, Kyrgyzstan, ... (2023 databases).  The
+# transfer is not read on its own; it is part of the trade deficit and of household spending,
+# and the benchmark must still reproduce the SAM, with C-9 closing.  The solves fail on the
+# YG >= 0 bound that preceded 2026-10-06: C-3 then held only at YG = 1e-8, C-9 missed by
+# 0.5 x investment under :bop, and under inv_closure = :savings investment came out 50 % high.
+@testset "negative government revenue (transfer-financed consumption)" begin
+    function remittance_economy(; kw...)
+        d = init_data()
+        d.sets[:i]  = ["pdr","wht","gro","ctl","oap","coa","oil","ely","chm","tex","trd","osg"]
+        d.sets[:cr] = ["pdr","wht","gro"]; d.sets[:lv] = ["ctl","oap"]; d.sets[:e] = ["coa","oil","ely"]
+        d.sets[:ft] = ["chm"]; d.sets[:fd] = ["wht","gro"]; d.sets[:r] = ["R1"]
+        prepare_data!(d; outdir=nothing, calibrate=false, precompute=false, kw...)
+        M = d.balanced_sam; ix = d.sam_index; hh = ix["HH"]; row = ix["ROW"]
+        coms = [ix["COM_"*p] for p in d.sets[:i]]
+        calibrate_from_sam!(d)
+        R = d.par[:bench][:YG] + 0.5 * d.par[:bench][:INV]    # YG0 falls one for one with C
+        w = [M[row, c] for c in coms]; w ./= sum(w)
+        Δ = zeros(size(M))
+        Δ[hh, row] += R                                         # the transfer
+        for (c, wc) in zip(coms, w)
+            Δ[c, hh] += R * wc; Δ[row, c] += R * wc             # spent on imported consumption
+        end
+        M .+= Δ; d.sam === M || (d.sam .+= Δ)
+        calibrate_from_sam!(d); d.metadata[:PAR] = precompute_parameters(d)
+        return d, R
+    end
+    c9(m) = (I = value(m[:PFD]["Inv"]) * value(m[:FD]["Inv"]);
+             (I - (sum(value(m[:SAV][h]) + value(m[:DeprY][h]) for h in ("HH",)) + value(m[:Sg]) + value(m[:Sf]["R1"]))) / I)
+
+    d, R = remittance_economy()
+    M = d.balanced_sam; ix = d.sam_index; B = d.par[:bench]; iset = d.sets[:i]
+    @test R > 0 && isapprox(M[ix["HH"], ix["ROW"]], R; rtol=1e-12)
+    @test maximum(abs.(vec(sum(M; dims=2)) .- vec(sum(M; dims=1)))) < 1e-8 * sum(M)   # still balanced
+    @test isapprox(B[:YG], -0.5 * B[:INV]; rtol=1e-8) && d.par[:kappa_h]["HH"] < 0
+    # the SAM's household consumption and its trade deficit (which includes the transfer)
+    @test isapprox(B[:HH], sum(M[ix["COM_"*p], ix["HH"]] for p in iset); rtol=1e-12)
+    deficit = sum(M[ix["ROW"], ix["COM_"*p]] - M[ix["COM_"*p], ix["ROW"]] for p in iset) - M[ix["TAX_EXP"], ix["ROW"]]
+    @test isapprox(B[:Sf], deficit; rtol=1e-8)
+    # C-9 closes in the calibrated table (to the 1e-6 floor on SAV0)
+    @test abs(B[:INV] - (B[:SAV] + B[:DeprY] + B[:Sg] + B[:Sf])) < 1e-5
+    m = model(d; show_solver_output=false)
+    @test !has_lower_bound(m[:YG]) && start_value(m[:YG]) == B[:YG]
+    @test num_variables(m) == num_constraints(m; count_variable_in_set_constraints=false)
+
+    if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
+        xp0 = B[:XP]
+        solve_model!(m; output="no", show_diagnostics=false)
+        @test termination_status(m) == JuMP.LOCALLY_SOLVED
+        @test maximum(abs(value(m[:XP][p]) / xp0[p] - 1) for p in iset) < 1e-4
+        @test isapprox(value(m[:YG]), B[:YG]; rtol=1e-6)
+        @test abs(c9(m)) < 1e-6
+        # a 20 % tariff cut: C-9 still implied (Walras' law) to the ~1e-5 a shocked solve leaves on the
+        # unmodified economy too (-8e-6 there; the bounded YG left -0.5 here), and revenue still < 0
+        PAR = parameters(d); tm0 = copy(PAR[:tau_m])
+        for (k, v) in tm0; PAR[:tau_m][k] = 0.8 * v; end
+        mt = model(d; show_solver_output=false)
+        solve_model!(mt; output="no", show_diagnostics=false)
+        @test termination_status(mt) == JuMP.LOCALLY_SOLVED
+        @test abs(c9(mt)) < 1e-4 && value(mt[:YG]) < 0
+        for (k, v) in tm0; PAR[:tau_m][k] = v; end
+        # savings-driven investment (C-9 imposed): the benchmark investment replicates
+        ds, _ = remittance_economy(; bop_closure=:fixed_er, inv_closure=:savings)
+        ms = model(ds; show_solver_output=false)
+        solve_model!(ms; output="no", show_diagnostics=false)
+        @test termination_status(ms) == JuMP.LOCALLY_SOLVED
+        @test isapprox(value(ms[:FD]["Inv"]), ds.par[:bench][:INV]; rtol=1e-6)
+        println("negative revenue: YG0/I = ", round(B[:YG] / B[:INV]; digits=3), ", kappa_h = ",
+                round(d.par[:kappa_h]["HH"]; digits=3), "; C-9/I benchmark ", round(c9(m); sigdigits=2),
+                ", -20 % tariffs ", round(c9(mt); sigdigits=2))
+    end
+end

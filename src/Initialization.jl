@@ -457,7 +457,7 @@ function initialize_from_sam!(model, data::LinkageData)
 
     # ── Macro and fiscal closure ─────────────────────────────────────────────
     _safe_start_value!(model, :GDPMPr, (), B[:GDP])
-    _safe_start_value!(model, :YG,     (), B[:YG])
+    _safe_start_value_raw!(model, :YG, (), B[:YG])      # may be < 0 (Calibration.jl (6))
     _safe_start_value!(model, :TarY,   (), B[:TarY])
     _safe_start_value!(model, :RTarY,  (), B[:TarY])
     _safe_start_value!(model, :InvSh,  (), B[:InvSh])

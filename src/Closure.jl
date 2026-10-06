@@ -25,7 +25,9 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # (C-2) Real tariff revenue.
     @constraint(model, C_2, (RTarY) - (TarY / PGDP[rr0]) ⟂ RTarY)
 
-    # (C-3) Gross government revenues.
+    # (C-3) Gross government revenues.  An equation of the free variable YG: a negative
+    # calibrated kappa_h is a net transfer to households and can make YG < 0
+    # (Calibration.jl convention (6)).
     @constraint(model, C_3, (YG) - (sum(PAR[:tau_p][ii] * (1 + PAR[:pi][ii]) * PX[ii] * XP[ii] for ii in i)
           + sum(PAR[:chi_kappa] * PAR[:kappa_h][hh] * YH[hh] for hh in h)
           + sum(PA[ii] * (sum(PAR[:tau_Ap][(ii,jj)]*XAp[ii,jj] for jj in i) + sum(PAR[:tau_Ac][(ii,hh)]*XAc[ii,hh] for hh in h) + sum(PAR[:tau_Af][(ii,ff)]*XAf[ii,ff] for ff in f)) for ii in i)

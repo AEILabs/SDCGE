@@ -151,7 +151,8 @@ function add_variables!(model, data::LinkageData)
         # ── Closure / fiscal ──────────────────────────────────────────────────
         TarY   >= 0
         RTarY  >= 0
-        YG     >= 0
+        YG                  # free: the calibrated direct-tax rate kappa_h can be a net transfer
+                            # larger than every other tax (Calibration.jl convention (6))
         Sg
         RSg
         Sf[r]
