@@ -429,31 +429,37 @@ and a 20 % tariff cut on Kenya 2023 *lowers* real GDP 4.3 % with unemployment ri
 13 % (zero tariffs does not converge). The first `:wage_floor` build scales the labour force in the
 parameter table; build another closure from a fresh `prepare_data!` if it must stay unscaled.
 
-Batch on the 333 country databases (2026-10-06; SAM at the simulator's benchmark scale, largest
-flow 1e5; `~/Documents/Data/CGE/validation/sdcge_closure_check/`): real GDP (ΣXP) against each
-closure's own benchmark, median [90th percentile, maximum] over the solved cases.
+Batch on the 333 country databases (2026-10-06, main `ceddf5b`: the 14 databases the
+savings–investment and input-tax fixes touch re-run; SAM at the simulator's benchmark scale,
+largest flow 1e5; `~/Documents/Data/CGE/validation/sdcge_closure_check/`): real GDP (ΣXP)
+against each closure's own benchmark, median [90th percentile, maximum] over the solved cases.
 
 | | benchmark solves | −20 % tariffs | zero tariffs |
 |---|---|---|---|
-| `:fixed_wage` (`:flex_er`) | 324 | 312: +0.53 % [3.4 %, 61 %] | 287: +2.6 % [17 %, 145 %]; labour demand above the labour force in 274 (median 2.8 %, up to 153 %) |
-| `:full_employment` (`:fixed_er`) | 311 (321) | 310 (318): +0.06 % [0.35 %, 2.3 %] | 296 (305): +0.29 % [1.6 %, 12 %] |
-| `:wage_floor` (`:fixed_er`, database rates) | 312 (321) | 310 (320): +0.15 % [0.83 %, 3.9 %] | 298 (308): +0.68 % [3.0 %, 13 %] |
+| `:fixed_wage` (`:flex_er`) | 328 | 316: +0.54 % [3.6 %, 61 %] | 289: +2.6 % [17 %, 145 %]; labour demand above the labour force in 277 (median 2.8 %, up to 153 %) |
+| `:full_employment` (`:fixed_er`) | 316 (324) | 314 (321): +0.07 % [0.35 %, 2.3 %] | 299 (308): +0.30 % [1.6 %, 12 %] |
+| `:wage_floor` (`:fixed_er`, database rates) | 316 (324) | 315 (323): +0.16 % [0.87 %, 3.9 %] | 302 (311): +0.69 % [3.0 %, 13 %] |
 
 In brackets: solved when a failed solve is retried with the SAM at its own scale (the 1e5
 normalisation that rescues `:fixed_wage` puts the two market-clearing closures' benchmark
 residuals, ~5e-6, above PATH's absolute 1e-6, so PATH has to move on a near-singular Jacobian;
 at the raw scale the start point already passes; where both solve, real GDP agrees to 1e-5
-points). Paired, `:wage_floor` is never below `:full_employment` and is below `:fixed_wage` in
-92 % (−20 %) / 96 % (zero tariffs) of the databases where all three solve. After zero tariffs
-both skills are still unemployed at the floor wage in 241 databases, one skill has reached full
-employment in 41 and both in 16. Kenya 2023 (database rates 5.2 % / 8.2 %): −20 % tariffs
-+1.12 %, zero tariffs +5.2 % (unemployment 0, wage +20 %); its 133-sector hybrid +2.6 %; South
-Africa +1.9 %, Cameroon +2.3 % (fixed wage: +73 %). A three-period run on Kenya keeps
-unemployment and the wage flat across periods (no zig-zag). Non-convergence is shared with
-`:full_employment`: no benchmark fails under `:wage_floor` that solves under it; nine databases
-fail under every closure (no crop land in GTAP 12: Hong Kong, Mauritius, Iceland's hybrid; and
-the 133-sector hybrids of Kyrgyzstan, Laos, Nepal, Pakistan — these four solve since the
-2026-10-06 input-tax fix, see "Calibration conventions"; the table predates it).
+points). Paired, `:wage_floor` is below `:full_employment` once (Slovenia `gtap12`, zero tariffs:
++0.79 % against +0.86 %) and below `:fixed_wage` in 91 % (−20 %) / 95 % (zero tariffs) of the
+databases where all three solve. After zero tariffs both skills are still unemployed at the
+floor wage in 244 databases, one skill has reached full employment in 42 and both in 16. Kenya
+2023 (database rates 5.2 % / 8.2 %): −20 % tariffs +1.12 %, zero tariffs +5.2 % (unemployment 0,
+wage +20 %); its 133-sector hybrid +2.6 %; South Africa +1.9 %, Cameroon +2.3 % (fixed wage:
++73 %). A three-period run on Kenya keeps unemployment and the wage flat across periods (no
+zig-zag). Non-convergence is shared with `:full_employment`: at the 1e5 scale the same
+benchmarks fail under both. Five fail under every closure (no crop land in GTAP 12: Hong Kong
+`gtap12` and `hybrid133`, Mauritius `gtap12` and `hybrid133`, Iceland `hybrid133`); Syria `gtap12`
+solves only under `:fixed_wage` (two value-added-free metal sectors). The two fixes changed no
+real GDP result by more than 1e-6 points where a case solved before and after, except Tajikistan
+`gtap12` under `:fixed_wage`, −20 % tariffs: −16.8 % before, −5.2 % now. `YG` and `Sg` feed only
+C-9, which `:bop` drops, so this is PATH reaching a different solution of the weakly anchored
+fixed-wage, flexible-exchange-rate equilibrium (unemployment 17 % against 5 %), not an effect of
+the fix.
 
 The data pipeline in `~/Documents/Data/CGE` ships each country with `sam.csv`
 (the real SAM, for `:bop`) and `sam_balanced_trade.csv` (pre-balanced good by
