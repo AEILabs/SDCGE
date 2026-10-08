@@ -67,9 +67,8 @@
 #     inflow, which the balanced-trade convention cannot represent.
 # (3) SUBSISTENCE = 0.  The ELES subsistence quantities theta_k,h are set to 0
 #     (the SAM carries no information on them), so D-1/D-2 reduce to
-#     XH_k = mu_c_k · YC and mu_c is calibrated from benchmark consumption.
-#     The direct-tax rate kappa_h is then the one remaining free parameter and is
-#     solved for so that C-9 delivers exactly the benchmark investment level.
+#     XH_k = mu_c_k · YC: mu_c is calibrated from benchmark consumption and
+#     disposable income, so 1 - Σ_k mu_c_k is the household saving rate (D-3).
 # (4) ZERO FACTOR ENDOWMENTS (2026-09-14).  `par[:chi_F][p] = max(nrs[p], 1e-9)`
 #     and `par[:FSupply]` likewise floor the sector-specific ("natural resource")
 #     factor at 1e-9 so that the CES formulas never divide by zero.  That floor is
@@ -91,39 +90,25 @@
 #     disinvestment schedule.  Under :fixed_wage F-24 still pins RR = 1, which
 #     together with F-23/F-30 forces Kvd[p,"Old"] = K0[p] exactly.  Both give
 #     RR = 1 and the same solution at the benchmark.
-# (6) INSTITUTIONS AND GOVERNMENT REVENUE (2026-10-06).  The SAM's institution
-#     block is not read cell by cell.  Section 6 below takes C, G, I (COM x
-#     HH/GOV/INV), factor income, the activity and trade taxes (Tother) and the
-#     trade deficit (Sf0), and derives the rest:
-#       SAV0 = FactorInc + Tother + Sf0 - I - C - G, which a balanced SAM makes
-#         zero identically (floored at 1e-6): the SAM's own household and
-#         government saving (INV x HH/GOV, HH/GOV x INV) are not used.  (Y-8 and
-#         D-3 both subtract SAV, so YD = C + 2 SAV and C-9 is consistent with the
-#         household budget only because SAV ~ 0; reading the SAM's household
-#         saving would need that fixed first.)
-#       kappa_h = 1 - (C + 2 SAV0)/YH0: the direct tax takes whatever households
-#         do not consume, so all domestic saving except DeprY0 is government saving
-#         and the benchmark revenue is, to 1e-10 on every database,
-#           YG0 = Tother + kappa_h·YH0 = Tother + FDtax_H + S_H - DeprY0
-#         with S_H the SAM's household saving (INV x HH - HH x INV), FDtax_H the
-#         final-demand tax households pay (TAX_OUT x HH, unread) and
-#         DeprY0 = 0.05·KY0.  Equivalently YG0 = G + I - DeprY0 - Sf0.
-#       Transfers (HH/GOV x ROW, ROW x HH/GOV, HH x GOV, GOV x HH) are not read
-#         either: a transfer from abroad is part of the trade deficit and of what
-#         the receiving household spends, so it ends up in Sf0 and kappa_h, and the
-#         benchmark still reproduces the SAM.  The country SAMs exported by the
-#         data pipeline carry none (GTAP books remittances and aid in S - I = X - M).
-#     Where households dissave in the SAM (consumption financed by remittances, aid
-#     and foreign borrowing, all inside Sf0), kappa_h < 0 is a net transfer to
-#     households (38 of the 333 2023 databases), and where that transfer exceeds
-#     Tother + FDtax_H, YG0 < 0 (11 of them: when the trade deficit exceeds
-#     G + I - DeprY0; Lebanon gtap12 YG0 = -25.7 x investment).  YG is therefore a
-#     free variable (Variables.jl).  Until 2026-10-06 it was bounded at 1e-8: C-3
-#     then held only as an inequality at that floor, Sg missed its calibrated value
-#     by -YG0, and the solved benchmark missed C-9 by YG0 (dropped under :bop, so
-#     the real solution was unaffected; under inv_closure = :savings or
-#     trade_closure = :balanced the benchmark investment did not replicate).
-
+# (6) INSTITUTIONS, SAVING AND GOVERNMENT REVENUE (2026-10-07).  Section 6 below
+#     reproduces the SAM's household and government saving:
+#       SAV0 = S_H - DeprY0, S_H = INV x HH - HH x INV the SAM's household saving and
+#         DeprY0 = 0.05·KY0 the depreciation allowance of Y-6 (household gross saving
+#         SAV + DeprY is S_H);
+#       YD0 = YC0 = C + SAV0 (Y-7, Y-8, D-3) and kappa_h = 1 - YD0/YH0, the SAM's
+#         final-demand tax on households (TAX_OUT x HH, no other direct tax is
+#         exported: GOV x HH = 0) as a share of household income;
+#       tau_Af[., Gov/Inv] = TAX_OUT x GOV/INV over the agent's basket, so PFD0 = 1 + tau_Af;
+#       YG0 = Tother + kappa_h·YH0 (C-3) and Sg0 = YG0 - PFD0_gov·G = S_G, the SAM's
+#         government saving INV x GOV - GOV x INV.
+#     C-9 then holds at the benchmark identically (to ~1e-14 of investment): summed with
+#     the household and government budgets it is the SAM's commodity and income
+#     identity.  Two things kept it from holding before 2026-10-07, so household saving
+#     was calibrated as the macro residual (~0) instead: Y-8 YC = YD - SAV with D-3
+#     subtracted saving twice (YD = C + 2 SAV), and C-3 levied the export tax on WPE
+#     instead of PE (tau_e² · exports of revenue from nowhere).  kappa_h then took all
+#     household non-consumption and was a net transfer (< 0) on 38 of the 333 2023
+#     databases.
 # Benchmark elasticities.  The SAM carries no elasticity information, so every
 # nest uses the same value; it is written into `par` (and therefore overrides the
 # ParameterTables default) so calibration and equations can never drift apart.
@@ -324,12 +309,20 @@ function calibrate_from_sam!(data::LinkageData)
 
     # C-1 at the benchmark: WPM = 1/(1+tau_m), sum_{r,rp} WTFd = XMT.
     TarY0 = sum(tau_m_s[p] * XMT0[p] / (1 + tau_m_s[p]) for p in i)
-    # C-3 export-tax term: WPE = 1+tau_e, sum_{r,rp} WTFs = ES.
-    ExpTax0 = sum(tau_e * (1 + tau_e) * ES0[p] for p in i)
-    # Every other tax instrument in C-3 (tau_l, tau_t, tau_k, tau_Ac, tau_Af,
-    # tau_trq_share) has no SAM account (TAX_FACT = TAX_INC = 0), so its rate is
-    # 0 and it contributes nothing.
-    Tother = sum(values(txo)) + sum(values(txi)) + TarY0 + ExpTax0
+    # C-3 export-tax term: tau_e·PE·WTFs, PE = 1 and sum_{r,rp} WTFs = ES.
+    ExpTax0 = sum(tau_e * ES0[p] for p in i)
+    # Final-demand taxes paid by government and investment (TAX_OUT x GOV/INV): one ad-valorem
+    # rate per agent on its whole basket, tau_Af[., f] (D-9: PFD = 1 + tau_Af at the benchmark).
+    # The households' final-demand tax (TAX_OUT x HH) stays inside kappa_h (convention (6)).
+    tau_fd = Dict(ff => (col = idx[uppercase(ff)];
+                         base = sum(max(M[idx["COM_"*p], col], 0.0) for p in i);
+                         base > EPS ? max(M[idx["TAX_OUT"], col], 0.0) / base : 0.0) for ff in ("Gov", "Inv"))
+    PFD0 = Dict(ff => 1.0 + tau_fd[ff] for ff in ("Gov", "Inv"))
+    # Every other tax instrument in C-3 (tau_l, tau_t, tau_k, tau_Ac, tau_trq_share)
+    # has no SAM account (TAX_FACT = TAX_INC = 0), so its rate is 0 and it
+    # contributes nothing.
+    Tother = sum(values(txo)) + sum(values(txi)) + TarY0 + ExpTax0 +
+             tau_fd["Gov"] * GOV0 + tau_fd["Inv"] * INVEST0
 
     # Benchmark foreign saving.  Under :bop it is the SAM's trade deficit valued
     # exactly as C-BOP values it (WPM = 1/(1+tau_m), WPE = 1+tau_e at ER = 1), so
@@ -338,20 +331,25 @@ function calibrate_from_sam!(data::LinkageData)
     Sf0 = trade_closure === :balanced ? 0.0 :
           sum(XMT0[p] / (1 + tau_m_s[p]) for p in i) - sum((1 + tau_e) * ES0[p] for p in i)
 
-    # Closure: D-3 gives SAV = YC - HH0, Y-8 gives YC = YD - SAV,
-    # Y-7 gives YD = (1-kappa)·YH0, C-4 gives Sg = YG - GOV0 and C-9 requires
-    # FD[Inv] = INVEST0 with foreign saving Sf0 on the financing side.
-    # Eliminating YC, YD, Sg and YG leaves
-    SAV0 = FactorInc + Tother + Sf0 - INVEST0 - HH0 - GOV0
-    if SAV0 <= 0.0
-        @warn "Benchmark household saving is non-positive ($SAV0); flooring at 1e-6."
-        SAV0 = 1.0e-6
-    end
-    kappa = 1.0 - (HH0 + 2 * SAV0) / YH0
+    # Saving (convention (6)).  Households save what the SAM says, S_H = INV x HH - HH x INV,
+    # of which DeprY0 is the depreciation allowance of Y-6, so SAV0 = S_H - DeprY0.  The
+    # household budget (Y-7, Y-8, D-3: YD = YC = C + SAV) then gives the direct tax, and C-3/C-4
+    # the government's revenue and saving.
+    S_H0  = M[inv_col, hh_col] - M[hh_col, inv_col]
+    SAV0  = S_H0 - DeprY0
+    YD0   = HH0 + SAV0
+    YC0   = YD0
+    kappa = 1.0 - YD0 / YH0
     YG0   = Tother + kappa * YH0
-    Sg0   = YG0 - GOV0
-    YC0   = HH0 + SAV0
-    YD0   = YC0 + SAV0
+    Sg0   = YG0 - PFD0["Gov"] * GOV0
+    # C-9 then holds at the benchmark identically, whatever S_H is: summed with the household and
+    # government budgets it is the SAM's own commodity and income identity.  A gap means the
+    # SAM's accounts do not balance in the model's terms.
+    si_gap = PFD0["Inv"] * INVEST0 - (SAV0 + DeprY0 + Sg0 + Sf0)
+    if abs(si_gap) > 1.0e-6 * max(INVEST0, 1.0)
+        @warn "Benchmark savings-investment gap $(si_gap) (C-9): the SAM's institution accounts " *
+              "do not balance in the model's terms; the benchmark will not replicate C-9."
+    end
 
     # ── 7. Per-vintage nest quantities (all prices in the nest = 1 except the
     #       tax-inclusive intermediate bundles) ───────────────────────────────
@@ -541,6 +539,7 @@ function calibrate_from_sam!(data::LinkageData)
                                       for rr in r for rrp in rp for p in i)
     par[:kappa_h] = Dict(hh => kappa for hh in h)
     par[:chi_kappa] = 1.0
+    par[:tau_Af] = Dict{Any,Float64}((p,ff) => get(tau_fd, ff, 0.0) for p in i for ff in f)
 
     # Armington / CET trade shares (all nest prices are 1, so shares are values).
     par[:beta_m] = Dict(p => XMT0[p]/max(XA0[p],EPS) for p in i)
@@ -617,10 +616,11 @@ function calibrate_from_sam!(data::LinkageData)
     B[:XMT]=XMT0; B[:ES]=ES0
     B[:C]=C0; B[:G]=G0; B[:I]=I0
     B[:TY]=TY0; B[:FY]=FY0; B[:KY]=KY0; B[:LY]=LY0
-    B[:YH]=YH0; B[:YD]=YD0; B[:YC]=YC0; B[:SAV]=SAV0; B[:YSTAR]=YC0
+    B[:YH]=YH0; B[:YD]=YD0; B[:YC]=YC0; B[:SAV]=SAV0; B[:YSTAR]=YC0; B[:S_H]=S_H0
     B[:DeprY]=DeprY0; B[:YG]=YG0; B[:Sg]=Sg0; B[:TarY]=TarY0
     B[:GDP]=GDP0; B[:InvSh]=INVEST0/max(GDP0,EPS)
     B[:HH]=HH0; B[:GOV]=GOV0; B[:INV]=INVEST0
+    B[:PFD]=Dict(ff => get(PFD0, ff, 1.0) for ff in f)
     B[:KS]=sum(cap[p] for p in i)
     B[:KSs]=Dict(p => cap[p] for p in i)
     B[:TLnd]=tot_land

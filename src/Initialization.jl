@@ -322,7 +322,7 @@ function initialize_from_sam!(model, data::LinkageData)
         _safe_start_value!(model, :DeprY, (hh,), B[:DeprY])
         _safe_start_value!(model, :YD,    (hh,), B[:YD])
         _safe_start_value!(model, :YC,    (hh,), B[:YC])
-        _safe_start_value!(model, :SAV,   (hh,), B[:SAV])
+        _safe_start_value_raw!(model, :SAV, (hh,), B[:SAV])      # may be < 0
         _safe_start_value!(model, :YSTAR, (hh,), B[:YSTAR])
         _safe_start_value!(model, :CPIH,  (hh,), 1.0)
         for ii in i
@@ -353,14 +353,18 @@ function initialize_from_sam!(model, data::LinkageData)
     fd_start = Dict("Gov" => B[:GOV], "Inv" => B[:INV])
     fd_qty   = Dict("Gov" => B[:G],   "Inv" => B[:I])
     for ff in f
+        # D-9: PFD = 1 + tau_Af, the agent's final-demand tax (Calibration.jl, section 6)
+        pfd = get(get(B, :PFD, Dict()), ff, 1.0)
         _safe_start_value!(model, :FD,  (ff,), get(fd_start, ff, B[:INV]))
-        _safe_start_value!(model, :PFD, (ff,), 1.0)
+        _safe_start_value!(model, :PFD, (ff,), pfd)
         qty = get(fd_qty, ff, B[:I])
         for ii in i
             xafv = qty[ii]
+            # D-12/D-13 price the split at the tax-inclusive PFD over the untaxed PD/PMT
+            wedge = (1 + get(PAR[:tau_Af], (ii,ff), 0.0))^get(PAR[:sigma_mf], (ii,ff), 0.0)
             _safe_start_value!(model, :XAf, (ii,ff), xafv)
-            _safe_start_value!(model, :XDf, (ii,ff), get(PAR[:beta_d], ii, 0.9) * xafv)
-            _safe_start_value!(model, :XMf, (ii,ff), get(PAR[:beta_m], ii, 0.1) * xafv)
+            _safe_start_value!(model, :XDf, (ii,ff), get(PAR[:beta_d], ii, 0.9) * wedge * xafv)
+            _safe_start_value!(model, :XMf, (ii,ff), get(PAR[:beta_m], ii, 0.1) * wedge * xafv)
         end
     end
 

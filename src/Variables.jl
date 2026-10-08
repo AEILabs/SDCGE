@@ -89,7 +89,7 @@ function add_variables!(model, data::LinkageData)
         YC[h]     >= 0
         XH[k,h]   >= 0
         PC[k]     >= 0
-        SAV[h]    >= 0
+        SAV[h]              # free: the SAM's household saving net of depreciation can be < 0
         YSTAR[h]  >= 0
         CPIH[h]   >= 0
 
@@ -151,8 +151,7 @@ function add_variables!(model, data::LinkageData)
         # ── Closure / fiscal ──────────────────────────────────────────────────
         TarY   >= 0
         RTarY  >= 0
-        YG                  # free: the calibrated direct-tax rate kappa_h can be a net transfer
-                            # larger than every other tax (Calibration.jl convention (6))
+        YG                  # free: net revenue is negative where subsidies exceed taxes
         Sg
         RSg
         Sf[r]

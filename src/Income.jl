@@ -73,8 +73,11 @@ function add_income_equations!(model, data::LinkageData, PAR)
     # (Y-7) Disposable income after direct tax.
     @constraint(model, Y_7[hh in h], (YD[hh]) - ((1 - PAR[:chi_kappa] * PAR[:kappa_h][hh]) * YH[hh]) ⟂ YD[hh])
 
-    # (Y-8) Income allocated by the LES/ELES mechanism.
-    @constraint(model, Y_8[hh in h], (YC[hh]) - (YD[hh] - SAV[hh]) ⟂ YC[hh])
+    # (Y-8) Income allocated by the ELES: all of disposable income.  The ELES (D-1..D-3) splits it
+    # into consumption and saving, D-3 being the saving equation, so YD = Σ PC·XH + SAV.  Until
+    # 2026-10-07 this was YC = YD − SAV, which with D-3 subtracted saving twice
+    # (YD = Σ PC·XH + 2·SAV; Calibration.jl convention (6)).
+    @constraint(model, Y_8[hh in h], (YC[hh]) - (YD[hh]) ⟂ YC[hh])
 
     return model
 end
