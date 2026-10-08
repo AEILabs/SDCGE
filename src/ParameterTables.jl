@@ -141,7 +141,7 @@ function precompute_parameters(data::LinkageData)
     _fill!(PAR, :kappa_h, h, 0.0)
     PAR[:chi_kappa] = 1.0
     _fill!(PAR, :delta_f, [(ii,vv) for ii in i for vv in v], 0.05)
-    _fill!(PAR, :WTR, [(rr,rrp,inn,"HH",hh) for rr in r for rrp in rp for inn in ins for hh in h], 0.0)
+    _fill!(PAR, :WTRbar, h, 0.0)      # net current transfers from abroad to households (foreign currency)
 
     # Factor market and dynamic parameters used by the complete paper-numbered equations.
     _fill!(PAR, :g_l, [(ll,gg) for ll in l for gg in S[:gz]], 0.0)
@@ -386,4 +386,43 @@ function read_unemployment_csv(path::AbstractString)
         x = raw[k, ir]; out[lab] = x isa Real ? float(x) : parse(Float64, strip(string(x)))
     end
     return out
+end
+
+"""
+    read_transfers_csv(path) -> Dict{String,Float64}
+
+Net current transfers from the rest of the world by institution, from a two-column CSV with a
+header, `institution,value`: in the SAM's own units, positive for a net inflow.  Only `HH`
+(households) is modelled (Calibration.jl convention (7)).
+"""
+function read_transfers_csv(path::AbstractString)
+    raw = readdlm(path, ',', Any, '\n')
+    hdr = lowercase.(strip.(string.(raw[1, :])))
+    ii = findfirst(==("institution"), hdr); iv = findfirst(==("value"), hdr)
+    (ii === nothing || iv === nothing) && error("$(path): expected the columns institution,value")
+    out = Dict{String,Float64}()
+    for k in 2:size(raw, 1)
+        ins = strip(string(raw[k, ii])); isempty(ins) && continue
+        ins == "HH" || error("$(path): transfers to $(ins) are not modelled (only HH)")
+        x = raw[k, iv]; out[ins] = x isa Real ? float(x) : parse(Float64, strip(string(x)))
+    end
+    return out
+end
+
+"""
+    fold_transfers!(data, t)
+
+Book net current transfers `t` from abroad to households in the SAM's HH x ROW cell (the net
+of HH x ROW - ROW x HH becomes `t`).  What changes is moved out of the rest of the world's
+saving (INV x ROW) into household saving (INV x HH), so every account stays balanced.
+"""
+function fold_transfers!(data::LinkageData, t::Real)
+    M = data.sam; ix = data.sam_index; hh = ix["HH"]; row = ix["ROW"]; inv = ix["INV"]
+    dt = t - (M[hh, row] - M[row, hh])
+    M[hh, row] = max(t, 0.0); M[row, hh] = max(-t, 0.0)
+    for (a, x) in ((hh, dt), (row, -dt))          # net saving INV x a - a x INV moves by x
+        net = M[inv, a] - M[a, inv] + x
+        M[inv, a] = max(net, 0.0); M[a, inv] = max(-net, 0.0)
+    end
+    return data
 end

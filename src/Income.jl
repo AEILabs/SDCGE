@@ -4,7 +4,7 @@
 
 function add_income_equations!(model, data::LinkageData, PAR)
     S=data.sets; default_sets!(data)
-    i=S[:i]; r=S[:r]; rp=S[:rp]; v=S[:v]; l=S[:l]; h=S[:h]; ins=S[:in]
+    i=S[:i]; v=S[:v]; l=S[:l]; h=S[:h]
 
     # JuMP variables declared in Variables.jl
     LV      = model[:LV]
@@ -58,13 +58,16 @@ function add_income_equations!(model, data::LinkageData, PAR)
 
     # (Y-5) Household income allocation across factor incomes, fiscal depreciation,
     # government transfers, and net foreign transfers.
-    # Note: phi_* and TRG/WTR are calibrated/precomputed tables in PAR.
+    # Note: phi_* and TRG/WTRbar are calibrated/precomputed tables in PAR.  WTRbar is a lump
+    # sum in foreign currency valued at the exchange rate (Calibration.jl convention (7); no ER
+    # and WTRbar = 0 under :balanced).
+    ERv = haskey(model, :ER) ? model[:ER] : 1.0
     @constraint(model, Y_5[hh in h], (YH[hh]) - (PAR[:phi_T][hh] * TY
           + PAR[:phi_F][hh] * FY
           + sum(PAR[:phi_L][(hh,ll)] * LY[ll] for ll in l)
           + PAR[:phi_K][hh] * (KY - sum(DeprY[hhh] for hhh in h))
           + PAR[:TRG][hh]
-          + PNUM * sum(PAR[:WTR][(rr,rrp,inn,"HH",hh)] for rr in r for rrp in rp for inn in ins)) ⟂ YH[hh])
+          + PNUM * ERv * PAR[:WTRbar][hh]) ⟂ YH[hh])
 
     # (Y-6) Fiscal depreciation allocated using capital-income shares.
     @constraint(model, Y_6[hh in h], (DeprY[hh]) - (PAR[:phi_K][hh] *

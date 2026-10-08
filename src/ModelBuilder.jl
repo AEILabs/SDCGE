@@ -37,6 +37,10 @@ Keyword arguments:
 - `balance = :ras`: apply RAS balancing. Use `balance = :none` to skip.
 - `calibrate = true`: run `calibrate_from_sam!`.
 - `precompute = true`: store `data.metadata[:PAR] = precompute_parameters(data)`.
+- `transfers_path = nothing`: net current transfers from abroad to households, a CSV with
+  `institution,value` rows (`HH`, SAM units); by default a `transfers.csv` next to a CSV SAM.
+  Folded into the SAM's HH x ROW cell.  Without one, households that dissave in the SAM
+  receive the gap as a transfer (Calibration.jl convention (7)).
 - `outdir = "results"`: directory for the SAM balance report and the balanced SAM.
   Pass `outdir = nothing` to skip those writes entirely — needed by embedding callers
   (a web backend, a batch driver) that must not write into the process's working
@@ -54,6 +58,7 @@ function prepare_data!(data::LinkageData=init_data();
         calibrate::Bool=true,
         precompute::Bool=true,
         unemployment_path::Union{Nothing,AbstractString}=nothing,
+        transfers_path::Union{Nothing,AbstractString}=nothing,
         outdir::Union{Nothing,AbstractString}="results")
 
     data.par[:trade_closure] = trade_closure
@@ -84,6 +89,18 @@ function prepare_data!(data::LinkageData=init_data();
         read_sam_excel!(data, sam_path)
     else
         error("Unknown SAM source: $(source). Use :default, :csv, or :excel.")
+    end
+
+    # Net current transfers from abroad to households (`institution,value` rows, SAM units):
+    # `transfers_path`, else a `transfers.csv` next to a CSV SAM.  Folded into the SAM's HH x ROW
+    # cell, out of foreign saving into household saving (Calibration.jl convention (7)).
+    tpath = transfers_path !== nothing ? transfers_path :
+            (source == :csv && sam_path !== nothing) ? joinpath(dirname(sam_path), "transfers.csv") : nothing
+    if tpath !== nothing && isfile(tpath)
+        data.par[:transfers_data] = read_transfers_csv(tpath)
+        fold_transfers!(data, get(data.par[:transfers_data], "HH", 0.0))
+    elseif transfers_path !== nothing
+        error("prepare_data!: transfers_path $(transfers_path) does not exist.")
     end
 
     # The raw SAM read from file or generated internally may be unbalanced.

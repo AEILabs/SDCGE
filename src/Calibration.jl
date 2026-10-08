@@ -109,6 +109,20 @@
 #     instead of PE (tau_e² · exports of revenue from nowhere).  kappa_h then took all
 #     household non-consumption and was a net transfer (< 0) on 38 of the 333 2023
 #     databases.
+# (7) TRANSFERS FROM ABROAD (2026-10-07).  Net current transfers to households are a lump
+#     sum in foreign currency, PAR[:WTRbar][h], valued at PNUM·ER in Y-5 and paid through the
+#     balance of payments (C-BOP: CIF imports - FOB exports = Sf + PNUM·ER·Σ WTRbar), so
+#     Sf is the current-account deficit.  WTRbar is the SAM's HH x ROW - ROW x HH, or, where
+#     the SAM has none (every exported SAM, 2026-10-07: GTAP folds remittances, aid and
+#     foreign borrowing into S - I = X - M) and households dissave (S_H < DeprY0, 40 of the 333
+#     2023 databases), the gap DeprY0 - S_H, with SAV0 = 0.  An explicit amount comes from
+#     transfers.csv next to a CSV SAM (`institution,value`, SAM units; prepare_data! folds it
+#     into the HH x ROW cell, moving it out of foreign saving into household saving), and any
+#     dissaving it leaves stays in SAV0.  Before, the gap was a negative kappa_h, a transfer
+#     proportional to factor income (consumption moved 1 - kappa_h = 2.07 times household
+#     factor income on Lebanon gtap12, 3.10 on Kyrgyzstan gtap12).  Under :balanced
+#     (no exchange rate, no current account) WTRbar = 0 and a transfer cell stays in kappa_h.
+
 # Benchmark elasticities.  The SAM carries no elasticity information, so every
 # nest uses the same value; it is written into `par` (and therefore overrides the
 # ParameterTables default) so calibration and equations can never drift apart.
@@ -305,7 +319,6 @@ function calibrate_from_sam!(data::LinkageData)
                "SkLab"   => max(sum(sld[p] for p in i), EPS))
     FactorInc = TY0 + FY0 + KY0 + sum(values(LY0))
     DeprY0 = delta_f * KY0
-    YH0    = FactorInc - DeprY0                     # Y-5 with phi = 1, TRG = 0
 
     # C-1 at the benchmark: WPM = 1/(1+tau_m), sum_{r,rp} WTFd = XMT.
     TarY0 = sum(tau_m_s[p] * XMT0[p] / (1 + tau_m_s[p]) for p in i)
@@ -331,12 +344,22 @@ function calibrate_from_sam!(data::LinkageData)
     Sf0 = trade_closure === :balanced ? 0.0 :
           sum(XMT0[p] / (1 + tau_m_s[p]) for p in i) - sum((1 + tau_e) * ES0[p] for p in i)
 
-    # Saving (convention (6)).  Households save what the SAM says, S_H = INV x HH - HH x INV,
-    # of which DeprY0 is the depreciation allowance of Y-6, so SAV0 = S_H - DeprY0.  The
-    # household budget (Y-7, Y-8, D-3: YD = YC = C + SAV) then gives the direct tax, and C-3/C-4
-    # the government's revenue and saving.
+    # Saving and transfers from abroad (conventions (6) and (7)).  Households save what the SAM
+    # says, S_H = INV x HH - HH x INV, of which DeprY0 is the depreciation allowance of Y-6, so
+    # SAV0 = S_H - DeprY0.  Net current transfers from abroad, WTR0 (foreign currency, ER = 1),
+    # are the SAM's HH x ROW - ROW x HH (a transfers.csv is folded into that cell on read).
+    # Where the SAM has none and households dissave (SAV0 < 0: consumption financed by
+    # remittances, aid and foreign borrowing, which the exported SAMs book in foreign saving),
+    # the gap is booked as that transfer and SAV0 = 0.  Either way foreign saving is the current
+    # account net of the transfer.  Under :balanced no transfer is modelled (it stays in kappa_h).
     S_H0  = M[inv_col, hh_col] - M[hh_col, inv_col]
     SAV0  = S_H0 - DeprY0
+    WTR0  = trade_closure === :balanced ? 0.0 : M[hh_col, row_col] - M[row_col, hh_col]
+    if trade_closure !== :balanced && WTR0 == 0.0 && SAV0 < 0.0
+        WTR0 = -SAV0; SAV0 = 0.0
+    end
+    Sf0  -= WTR0
+    YH0   = FactorInc - DeprY0 + WTR0               # Y-5 with phi = 1, TRG = 0
     YD0   = HH0 + SAV0
     YC0   = YD0
     kappa = 1.0 - YD0 / YH0
@@ -538,6 +561,7 @@ function calibrate_from_sam!(data::LinkageData)
     par[:tau_e]  = Dict{Any,Float64}((rr,rrp,p) => tau_e
                                       for rr in r for rrp in rp for p in i)
     par[:kappa_h] = Dict(hh => kappa for hh in h)
+    par[:WTRbar]  = Dict(hh => WTR0 for hh in h)     # Y-5 / C-BOP, foreign currency
     par[:chi_kappa] = 1.0
     par[:tau_Af] = Dict{Any,Float64}((p,ff) => get(tau_fd, ff, 0.0) for p in i for ff in f)
 
@@ -640,7 +664,7 @@ function calibrate_from_sam!(data::LinkageData)
     B[:TLnd]=tot_land
     B[:kappa]=kappa; B[:tau_e]=tau_e
     B[:WPE]=wpe0; B[:WPM]=wpm0
-    B[:ER]=1.0; B[:Sf]=Sf0
+    B[:ER]=1.0; B[:Sf]=Sf0; B[:WTR]=WTR0
     par[:bench] = B
 
     return data
