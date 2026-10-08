@@ -91,18 +91,6 @@ function prepare_data!(data::LinkageData=init_data();
         error("Unknown SAM source: $(source). Use :default, :csv, or :excel.")
     end
 
-    # Net current transfers from abroad to households (`institution,value` rows, SAM units):
-    # `transfers_path`, else a `transfers.csv` next to a CSV SAM.  Folded into the SAM's HH x ROW
-    # cell, out of foreign saving into household saving (Calibration.jl convention (7)).
-    tpath = transfers_path !== nothing ? transfers_path :
-            (source == :csv && sam_path !== nothing) ? joinpath(dirname(sam_path), "transfers.csv") : nothing
-    if tpath !== nothing && isfile(tpath)
-        data.par[:transfers_data] = read_transfers_csv(tpath)
-        fold_transfers!(data, get(data.par[:transfers_data], "HH", 0.0))
-    elseif transfers_path !== nothing
-        error("prepare_data!: transfers_path $(transfers_path) does not exist.")
-    end
-
     # The raw SAM read from file or generated internally may be unbalanced.
     # Check only the accounting structure here; do not require balance until
     # after the balancing step below.
@@ -120,6 +108,18 @@ function prepare_data!(data::LinkageData=init_data();
     # `balance_sam_ras!` also replaces `data.sam` with the balanced matrix,
     # so downstream code cannot accidentally use the unbalanced raw SAM.
     assert_balanced_sam!(data; tol=1.0e-6)
+
+    # Net current transfers from abroad to households (`institution,value` rows, SAM units):
+    # `transfers_path`, else a `transfers.csv` next to a CSV SAM.  Folded into the balanced SAM's
+    # HH x ROW cell, out of foreign saving into household saving (Calibration.jl convention (7)).
+    tpath = transfers_path !== nothing ? transfers_path :
+            (source == :csv && sam_path !== nothing) ? joinpath(dirname(sam_path), "transfers.csv") : nothing
+    if tpath !== nothing && isfile(tpath)
+        data.par[:transfers_data] = read_transfers_csv(tpath)
+        fold_transfers!(data, get(data.par[:transfers_data], "HH", 0.0))
+    elseif transfers_path !== nothing
+        error("prepare_data!: transfers_path $(transfers_path) does not exist.")
+    end
 
     # Write diagnostics and the balanced SAM for inspection/re-use (skipped when
     # `outdir === nothing`).

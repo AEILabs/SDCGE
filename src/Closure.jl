@@ -56,7 +56,7 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # payments, government balance} redundant: summing the household, government
     # and investment budgets with goods-market clearing (E-1) and the Armington /
     # CET duality identities gives
-    #     Σ WPM·WTFd − Σ WPE·WTFs − PNUM·ER·Σ WTRbar  =  PFD[Inv]·FD[Inv] − (Σ SAV + Σ DeprY + Sg)
+    #     Σ WPM·WTFd − Σ WPE·WTFs − PNUM·PABS·Σ WTRbar  =  PFD[Inv]·FD[Inv] − (Σ SAV + Σ DeprY + Sg)
     # identically.  C-9 and C-BOP are therefore the same restriction, and only one
     # of them may be imposed.
     #
@@ -94,13 +94,14 @@ function add_closure_equations!(model, data::LinkageData, PAR)
         @constraint(model, C_7[rr in r; flex_er || rr != rr0],
             (Sf[rr]) - (PNUM * ER * PAR[:Sfbar][rr]) ⟂ Sf[rr])
 
-        # (C-BOP) Balance of payments of the home region, in world prices:
-        # CIF import value minus FOB export value equals foreign saving (the current-account
-        # deficit) plus the households' net transfers from abroad (Y-5).
+        # (C-BOP) Balance of payments of the home region, in world prices (domestic currency,
+        # WPM = ER·PWM0): CIF import value minus FOB export value equals foreign saving (the
+        # current-account deficit) plus the households' net transfers from abroad, at the value
+        # Y-5 pays them (PNUM·PABS·WTRbar; in foreign currency that value over ER).
         bop_gap = @expression(model,
             sum(WPM[rrp,rr,ii] * WTFd[rrp,rr,ii] for ii in i for rr in r for rrp in rp)
             - sum(WPE[rr,rrp,ii] * WTFs[rr,rrp,ii] for ii in i for rr in r for rrp in rp)
-            - Sf[rr0] - PNUM * ER * sum(PAR[:WTRbar][hh] for hh in h))
+            - Sf[rr0] - PNUM * model[:PABS] * sum(PAR[:WTRbar][hh] for hh in h))
         if flex_er
             @constraint(model, C_BOP, (bop_gap) - (0.0) ⟂ ER)
         else

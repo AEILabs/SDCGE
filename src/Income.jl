@@ -31,6 +31,7 @@ function add_income_equations!(model, data::LinkageData, PAR)
     YC      = model[:YC]
     SAV     = model[:SAV]
     PNUM    = model[:PNUM]
+    PABS    = model[:PABS]
 
     # Paper uses the old capital vintage in the fixed capital cost term of Y-4.
     oldv = ("Old" in v) ? "Old" : first(v)
@@ -58,16 +59,15 @@ function add_income_equations!(model, data::LinkageData, PAR)
 
     # (Y-5) Household income allocation across factor incomes, fiscal depreciation,
     # government transfers, and net foreign transfers.
-    # Note: phi_* and TRG/WTRbar are calibrated/precomputed tables in PAR.  WTRbar is a lump
-    # sum in foreign currency valued at the exchange rate (Calibration.jl convention (7); no ER
-    # and WTRbar = 0 under :balanced).
-    ERv = haskey(model, :ER) ? model[:ER] : 1.0
+    # Note: phi_* and TRG/WTRbar are calibrated/precomputed tables in PAR.  WTRbar, net
+    # transfers from abroad, is a lump sum fixed in real domestic terms, PNUM·PABS·WTRbar
+    # (Calibration.jl convention (7)); C-BOP pays the same value.
     @constraint(model, Y_5[hh in h], (YH[hh]) - (PAR[:phi_T][hh] * TY
           + PAR[:phi_F][hh] * FY
           + sum(PAR[:phi_L][(hh,ll)] * LY[ll] for ll in l)
           + PAR[:phi_K][hh] * (KY - sum(DeprY[hhh] for hhh in h))
           + PAR[:TRG][hh]
-          + PNUM * ERv * PAR[:WTRbar][hh]) ⟂ YH[hh])
+          + PNUM * PABS * PAR[:WTRbar][hh]) ⟂ YH[hh])
 
     # (Y-6) Fiscal depreciation allocated using capital-income shares.
     @constraint(model, Y_6[hh in h], (DeprY[hh]) - (PAR[:phi_K][hh] *

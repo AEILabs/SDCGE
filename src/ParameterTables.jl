@@ -141,7 +141,7 @@ function precompute_parameters(data::LinkageData)
     _fill!(PAR, :kappa_h, h, 0.0)
     PAR[:chi_kappa] = 1.0
     _fill!(PAR, :delta_f, [(ii,vv) for ii in i for vv in v], 0.05)
-    _fill!(PAR, :WTRbar, h, 0.0)      # net current transfers from abroad to households (foreign currency)
+    _fill!(PAR, :WTRbar, h, 0.0)      # net current transfers from abroad to households (real domestic terms)
 
     # Factor market and dynamic parameters used by the complete paper-numbered equations.
     _fill!(PAR, :g_l, [(ll,gg) for ll in l for gg in S[:gz]], 0.0)
@@ -412,17 +412,21 @@ end
 """
     fold_transfers!(data, t)
 
-Book net current transfers `t` from abroad to households in the SAM's HH x ROW cell (the net
-of HH x ROW - ROW x HH becomes `t`).  What changes is moved out of the rest of the world's
+Book net current transfers `t` from abroad to households in the balanced SAM's HH x ROW cell
+(the net of HH x ROW - ROW x HH becomes `t`).  What changes is moved out of the rest of the world's
 saving (INV x ROW) into household saving (INV x HH), so every account stays balanced.
 """
 function fold_transfers!(data::LinkageData, t::Real)
-    M = data.sam; ix = data.sam_index; hh = ix["HH"]; row = ix["ROW"]; inv = ix["INV"]
-    dt = t - (M[hh, row] - M[row, hh])
-    M[hh, row] = max(t, 0.0); M[row, hh] = max(-t, 0.0)
-    for (a, x) in ((hh, dt), (row, -dt))          # net saving INV x a - a x INV moves by x
-        net = M[inv, a] - M[a, inv] + x
-        M[inv, a] = max(net, 0.0); M[a, inv] = max(-net, 0.0)
+    ix = data.sam_index; hh = ix["HH"]; row = ix["ROW"]; inv = ix["INV"]
+    # the balanced SAM calibration reads, and the active SAM when it is a separate copy
+    for M in (data.balanced_sam === data.sam ? (data.sam,) : (data.balanced_sam, data.sam))
+        size(M, 1) == 0 && continue
+        dt = t - (M[hh, row] - M[row, hh])
+        M[hh, row] = max(t, 0.0); M[row, hh] = max(-t, 0.0)
+        for (a, x) in ((hh, dt), (row, -dt))      # net saving INV x a - a x INV moves by x
+            net = M[inv, a] - M[a, inv] + x
+            M[inv, a] = max(net, 0.0); M[a, inv] = max(-net, 0.0)
+        end
     end
     return data
 end

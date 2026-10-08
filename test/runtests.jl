@@ -305,93 +305,187 @@ if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
         @test all(abs(floorgap(mw, ll) - floorgap(mf, ll)) < 1e-7 for ll in L)
 
         # the regime switch: 5 % start, 20 % tariff cut -> unemployment falls, wage at the floor;
-        # 2 % start, zero tariffs -> unskilled unemployment exhausted and its wage above the floor,
-        # skilled still unemployed at the floor
+        # zero tariffs from 1 % unskilled / 3 % skilled unemployment -> unskilled unemployment
+        # exhausted and its wage above the floor, skilled still unemployed at the floor (zero
+        # tariffs cut unemployment by ~1.9 / 1.8 points from a 2 % start since 2026-10-07)
         m5, _ = solve_closure(:wage_floor; u=0.05, tm=0.8)
         @test all(1e-4 < ue(m5, ll) < 0.05 for ll in L)
         @test all(abs(floorgap(m5, ll)) < 1e-8 for ll in L)
-        m2, _ = solve_closure(:wage_floor; u=0.02, tm=0.0)
+        m2, _ = solve_closure(:wage_floor; u=Dict("UnSkLab" => 0.01, "SkLab" => 0.03), tm=0.0)
         @test ue(m2, "UnSkLab") < 1e-7 && floorgap(m2, "UnSkLab") > 1e-4
         @test ue(m2, "SkLab") > 1e-4 && abs(floorgap(m2, "SkLab")) < 1e-8
         println("wage_floor: 5 % start, -20 % tariffs: UE ", round.([ue(m5, ll) for ll in L]; digits=4),
-                "; 2 % start, zero tariffs: UE ", round.([ue(m2, ll) for ll in L]; digits=4),
+                "; 1 %/3 % start, zero tariffs: UE ", round.([ue(m2, ll) for ll in L]; digits=4),
                 ", TW/WMIN - 1 ", round.([floorgap(m2, ll) for ll in L]; sigdigits=3))
     end
 end
 
-# ── Negative government revenue: households that consume more than they earn ─────────────────
-# Calibration.jl convention (6).  The 12-sector synthetic economy plus a remittance R from
-# abroad (an HH x ROW transfer) that households spend on imports, sized so that the calibrated
-# revenue YG0 = Tother + kappa_h·YH0 is -0.5 x investment: kappa_h < 0 is a net transfer larger
-# than every other tax, the case of Lebanon, Syria, Kyrgyzstan, ... (2023 databases).  The
-# transfer is not read on its own; it is part of the trade deficit and of household spending,
-# and the benchmark must still reproduce the SAM, with C-9 closing.  The solves fail on the
-# YG >= 0 bound that preceded 2026-10-06: C-3 then held only at YG = 1e-8, C-9 missed by
-# 0.5 x investment under :bop, and under inv_closure = :savings investment came out 50 % high.
-@testset "negative government revenue (transfer-financed consumption)" begin
-    function remittance_economy(; kw...)
+# ── Transfers from abroad: households that consume more than they earn ───────────────────────
+# Calibration.jl convention (7).  The 12-sector synthetic economy, with households buying extra
+# imported consumption R that is financed from abroad, either (a) by dissaving (HH x INV), which
+# is how the exported country SAMs book remittances, aid and borrowing (Lebanon, Kyrgyzstan, ...),
+# or (b) by an explicit transfer cell HH x ROW.  In (a) the gap DeprY0 - S_H becomes the transfer
+# and SAV0 = 0; in (b) the cell is the transfer.  Either way it is a lump sum fixed in real
+# domestic terms, PNUM·PABS·WTRbar (Y-5, C-BOP), and kappa_h is the households' tax rate.  Until 2026-10-07 the transfer was a
+# negative kappa_h, proportional to factor income.
+@testset "transfers from abroad (lump sum)" begin
+    function twelve(; kw...)
         d = init_data()
         d.sets[:i]  = ["pdr","wht","gro","ctl","oap","coa","oil","ely","chm","tex","trd","osg"]
         d.sets[:cr] = ["pdr","wht","gro"]; d.sets[:lv] = ["ctl","oap"]; d.sets[:e] = ["coa","oil","ely"]
         d.sets[:ft] = ["chm"]; d.sets[:fd] = ["wht","gro"]; d.sets[:r] = ["R1"]
         prepare_data!(d; outdir=nothing, calibrate=false, precompute=false, kw...)
-        M = d.balanced_sam; ix = d.sam_index; hh = ix["HH"]; row = ix["ROW"]
+        return d
+    end
+    function remittance_economy(; cell::Bool, kw...)
+        d = twelve(; kw...)
+        M = d.balanced_sam; ix = d.sam_index; hh = ix["HH"]; row = ix["ROW"]; inv = ix["INV"]
         coms = [ix["COM_"*p] for p in d.sets[:i]]
-        calibrate_from_sam!(d)
-        R = d.par[:bench][:YG] + 0.5 * d.par[:bench][:INV]    # YG0 falls one for one with C
+        R = (M[inv, hh] - M[hh, inv]) + 0.3 * sum(M[c, hh] for c in coms)   # households end up dissaving
         w = [M[row, c] for c in coms]; w ./= sum(w)
         Δ = zeros(size(M))
-        Δ[hh, row] += R                                         # the transfer
+        Δ[hh, row] += R                                         # (b) a transfer HH x ROW ...
         for (c, wc) in zip(coms, w)
-            Δ[c, hh] += R * wc; Δ[row, c] += R * wc             # spent on imported consumption
+            Δ[c, hh] += R * wc; Δ[row, c] += R * wc             # ... spent on imported consumption
         end
         M .+= Δ; d.sam === M || (d.sam .+= Δ)
+        cell || fold_transfers!(d, 0.0)       # (a) the same flows as dissaving and foreign saving
         calibrate_from_sam!(d); d.metadata[:PAR] = precompute_parameters(d)
         return d, R
     end
+    sam(d, a, b) = d.balanced_sam[d.sam_index[a], d.sam_index[b]]
     c9(m) = (I = value(m[:PFD]["Inv"]) * value(m[:FD]["Inv"]);
-             (I - (sum(value(m[:SAV][h]) + value(m[:DeprY][h]) for h in ("HH",)) + value(m[:Sg]) + value(m[:Sf]["R1"]))) / I)
+             (I - (value(m[:SAV]["HH"]) + value(m[:DeprY]["HH"]) + value(m[:Sg]) + value(m[:Sf]["R1"]))) / I)
+    finet(m) = value(m[:TY]) + value(m[:FY]) + sum(value(m[:LY][l]) for l in ("UnSkLab", "SkLab")) +
+               value(m[:KY]) - value(m[:DeprY]["HH"])
 
-    d, R = remittance_economy()
-    M = d.balanced_sam; ix = d.sam_index; B = d.par[:bench]; iset = d.sets[:i]
-    @test R > 0 && isapprox(M[ix["HH"], ix["ROW"]], R; rtol=1e-12)
-    @test maximum(abs.(vec(sum(M; dims=2)) .- vec(sum(M; dims=1)))) < 1e-8 * sum(M)   # still balanced
-    @test isapprox(B[:YG], -0.5 * B[:INV]; rtol=1e-8) && d.par[:kappa_h]["HH"] < 0
-    # the SAM's household consumption and its trade deficit (which includes the transfer)
-    @test isapprox(B[:HH], sum(M[ix["COM_"*p], ix["HH"]] for p in iset); rtol=1e-12)
-    deficit = sum(M[ix["ROW"], ix["COM_"*p]] - M[ix["COM_"*p], ix["ROW"]] for p in iset) - M[ix["TAX_EXP"], ix["ROW"]]
-    @test isapprox(B[:Sf], deficit; rtol=1e-8)
-    # C-9 closes in the calibrated table (to the 1e-6 floor on SAV0)
-    @test abs(B[:INV] - (B[:SAV] + B[:DeprY] + B[:Sg] + B[:Sf])) < 1e-5
-    m = model(d; show_solver_output=false)
-    @test !has_lower_bound(m[:YG]) && start_value(m[:YG]) == B[:YG]
+    da, R = remittance_economy(cell=false)
+    db, _ = remittance_economy(cell=true)
+    for d in (da, db)
+        M = d.balanced_sam
+        @test maximum(abs.(vec(sum(M; dims=2)) .- vec(sum(M; dims=1)))) < 1e-8 * sum(M)    # balanced
+    end
+    Ba = da.par[:bench]; Bb = db.par[:bench]
+    S_Ha = sam(da, "INV", "HH") - sam(da, "HH", "INV")
+    @test sam(da, "HH", "ROW") == 0 && S_Ha < 0 && isapprox(sam(db, "HH", "ROW"), R; rtol=1e-12)
+    # (a) the dissaving is the transfer, saving 0; (b) the cell is the transfer, saving S_H - DeprY0
+    @test isapprox(da.par[:WTRbar]["HH"], Ba[:DeprY] - S_Ha; rtol=1e-12) && Ba[:SAV] == 0
+    @test isapprox(db.par[:WTRbar]["HH"], R; rtol=1e-12)
+    @test isapprox(Bb[:SAV] + Bb[:DeprY], sam(db, "INV", "HH") - sam(db, "HH", "INV"); rtol=1e-10)
+    for (d, B) in ((da, Ba), (db, Bb))
+        # kappa_h is the households' tax rate (GOV x HH and their final-demand tax), not a transfer
+        @test d.par[:kappa_h]["HH"] >= 0
+        @test isapprox(d.par[:kappa_h]["HH"] * B[:YH],
+                       sam(d, "GOV", "HH") + sam(d, "TAX_OUT", "HH") - sam(d, "HH", "GOV"); rtol=1e-8)
+        @test isapprox(B[:YH], B[:TY] + B[:FY] + sum(values(B[:LY])) + B[:KY] - B[:DeprY] + B[:WTR]; rtol=1e-12)
+        # foreign saving is the current account: the trade deficit less the transfer
+        iset = d.sets[:i]
+        deficit = sum(sam(d, "ROW", "COM_"*p) - sam(d, "COM_"*p, "ROW") for p in iset) - sam(d, "TAX_EXP", "ROW")
+        @test isapprox(B[:Sf], deficit - B[:WTR]; rtol=1e-8)
+        @test isapprox(B[:Sg], sam(d, "INV", "GOV") - sam(d, "GOV", "INV"); rtol=1e-8)
+        @test abs(B[:INV] - (B[:SAV] + B[:DeprY] + B[:Sg] + B[:Sf])) < 1e-8 * B[:INV]     # C-9
+        @test B[:YD] == B[:HH] + B[:SAV]                                                  # YD identity
+    end
+    # transfers.csv next to a CSV SAM is folded into HH x ROW and read from there
+    tmp = mktempdir()
+    for f in ("sam.csv", "sets.csv"); cp(joinpath(@__DIR__, "..", "data", "csv", f), joinpath(tmp, f)); end
+    open(joinpath(tmp, "transfers.csv"), "w") do io; println(io, "institution,value"); println(io, "HH,5.0"); end
+    dt = prepare_data!(init_data(); sets_path=joinpath(tmp, "sets.csv"), source=:csv,
+                       sam_path=joinpath(tmp, "sam.csv"), outdir=nothing)
+    @test dt.par[:transfers_data] == Dict("HH" => 5.0) && isapprox(sam(dt, "HH", "ROW"), 5.0; rtol=1e-6)
+    @test isapprox(dt.par[:WTRbar]["HH"], sam(dt, "HH", "ROW") - sam(dt, "ROW", "HH"); rtol=1e-12)
+    # :balanced has no exchange rate and no current account: no transfer
+    dc, _ = remittance_economy(cell=false, trade_closure=:balanced)
+    @test dc.par[:WTRbar]["HH"] == 0
+    m = model(da; show_solver_output=false)
     @test num_variables(m) == num_constraints(m; count_variable_in_set_constraints=false)
 
     if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
-        xp0 = B[:XP]
+        iset = da.sets[:i]; xp0 = Ba[:XP]
         solve_model!(m; output="no", show_diagnostics=false)
         @test termination_status(m) == JuMP.LOCALLY_SOLVED
         @test maximum(abs(value(m[:XP][p]) / xp0[p] - 1) for p in iset) < 1e-4
-        @test isapprox(value(m[:YG]), B[:YG]; rtol=1e-6)
-        @test abs(c9(m)) < 1e-6
-        # a 20 % tariff cut: C-9 still implied (Walras' law) to the ~1e-5 a shocked solve leaves on the
-        # unmodified economy too (-8e-6 there; the bounded YG left -0.5 here), and revenue still < 0
-        PAR = parameters(d); tm0 = copy(PAR[:tau_m])
+        @test isapprox(value(m[:YG]), Ba[:YG]; rtol=1e-6) && abs(c9(m)) < 1e-6
+        # a 20 % tariff cut moves factor income and the exchange rate; the transfer stays the same
+        # real amount (Y-5 and C-BOP), and the YD identity holds
+        PAR = parameters(da); tm0 = copy(PAR[:tau_m])
         for (k, v) in tm0; PAR[:tau_m][k] = 0.8 * v; end
-        mt = model(d; show_solver_output=false)
+        mt = model(da; show_solver_output=false)
         solve_model!(mt; output="no", show_diagnostics=false)
-        @test termination_status(mt) == JuMP.LOCALLY_SOLVED
-        @test abs(c9(mt)) < 1e-4 && value(mt[:YG]) < 0
         for (k, v) in tm0; PAR[:tau_m][k] = v; end
+        @test termination_status(mt) == JuMP.LOCALLY_SOLVED
+        pv = value(mt[:PNUM]) * value(mt[:PABS]); wtr = da.par[:WTRbar]["HH"]
+        @test abs(value(mt[:ER]) - 1) > 1e-4                               # the exchange rate moved ...
+        @test abs(finet(mt) / finet(m) - 1) > 1e-3                         # factor income moved ...
+        @test isapprox(value(mt[:YH]["HH"]) - finet(mt), pv * wtr; rtol=1e-8) # ... the transfer did not
+        mw = sum(value(mt[:WPM][a, b, p]) * value(mt[:WTFd][a, b, p]) for a in ("R1",), b in ("R1",), p in iset)
+        xw = sum(value(mt[:WPE][a, b, p]) * value(mt[:WTFs][a, b, p]) for a in ("R1",), b in ("R1",), p in iset)
+        @test isapprox(mw - xw - value(mt[:Sf]["R1"]), pv * wtr; rtol=1e-7)  # C-BOP
+        @test value(mt[:YC]["HH"]) == value(mt[:YD]["HH"]) ||
+              isapprox(value(mt[:YC]["HH"]), value(mt[:YD]["HH"]); rtol=1e-10)
+        @test isapprox(value(mt[:YD]["HH"]), sum(value(mt[:PC][k]) * value(mt[:XH][k, "HH"]) for k in da.sets[:k]) +
+                                             value(mt[:SAV]["HH"]); rtol=1e-8)
+        @test abs(c9(mt)) < 1e-4
         # savings-driven investment (C-9 imposed): the benchmark investment replicates
-        ds, _ = remittance_economy(; bop_closure=:fixed_er, inv_closure=:savings)
+        ds, _ = remittance_economy(cell=false, bop_closure=:fixed_er, inv_closure=:savings)
         ms = model(ds; show_solver_output=false)
         solve_model!(ms; output="no", show_diagnostics=false)
         @test termination_status(ms) == JuMP.LOCALLY_SOLVED
         @test isapprox(value(ms[:FD]["Inv"]), ds.par[:bench][:INV]; rtol=1e-6)
-        println("negative revenue: YG0/I = ", round(B[:YG] / B[:INV]; digits=3), ", kappa_h = ",
-                round(d.par[:kappa_h]["HH"]; digits=3), "; C-9/I benchmark ", round(c9(m); sigdigits=2),
-                ", -20 % tariffs ", round(c9(mt); sigdigits=2))
+        println("transfers: WTR/YH0 = ", round(Ba[:WTR] / Ba[:YH]; digits=3), ", kappa_h = ",
+                round(da.par[:kappa_h]["HH"]; digits=4), "; -20 % tariffs: factor income ",
+                round(100 * (finet(mt) / finet(m) - 1); digits=2), " %, C-9/I ", round(c9(mt); sigdigits=2))
+    end
+end
+
+# ── Household saving, government saving and GDP on a real SAM (KEN_2018_hybrid) ────────────
+# Calibration.jl convention (6) and Other.jl M-1..M-3: the benchmark reproduces the SAM's
+# household saving S_H (as SAV + DeprY, net of any transfer convention (7) imputes) and
+# government saving S_G, C-9 closes, and C-6 makes government demand a share of real GDP
+# (C + G + I + X - M), not of gross output.
+@testset "saving split and GDP (KEN_2018_hybrid)" begin
+    ken_sam  = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sam.csv")
+    ken_sets = joinpath(@__DIR__, "data", "KEN_2018_hybrid_sets.csv")
+    d = prepare_data!(init_data(); sets_path=ken_sets, source=:csv, sam_path=ken_sam, balance=:none, outdir=nothing)
+    B = d.par[:bench]; P = parameters(d); iset = d.sets[:i]
+    M = d.balanced_sam; ix = d.sam_index; c(a, b) = M[ix[a], ix[b]]
+    S_H = c("INV", "HH") - c("HH", "INV"); S_G = c("INV", "GOV") - c("GOV", "INV")
+    @test isapprox(B[:SAV] + B[:DeprY] - (B[:WTR] - (c("HH", "ROW") - c("ROW", "HH"))), S_H; rtol=1e-10)
+    @test isapprox(B[:Sg], S_G; rtol=1e-10)
+    @test B[:YD] == B[:YC] == B[:HH] + B[:SAV]                       # YD identity
+    @test abs(B[:INV] * B[:PFD]["Inv"] - (B[:SAV] + B[:DeprY] + B[:Sg] + B[:Sf])) < 1e-10 * B[:INV]
+    # chi_gov is government demand's share of GDP at market prices (C + G + I + X - M)
+    col(a) = sum(c("COM_"*p, a) for p in iset)
+    gdp = col("HH") + col("GOV") + c("TAX_OUT", "GOV") + col("INV") + c("TAX_OUT", "INV") +
+          col("ROW") + col("TRD_MRG") + c("TAX_EXP", "ROW") - sum(c("ROW", "COM_"*p) + c("TRD_MRG", "COM_"*p) for p in iset)
+    @test isapprox(P[:GDP0], gdp; rtol=1e-10)
+    @test isapprox(P[:chi_gov], col("GOV") / gdp; rtol=1e-10)
+    @test P[:chi_gov] > 1.5 * col("GOV") / P[:GO0]                    # was G / gross output
+    m = model(d; show_solver_output=false)
+    @test start_value(m[:RGDP]["R1"]) == start_value(m[:GDP]["R1"]) == B[:GDP]
+    @test start_value(m[:RGO]["R1"]) == P[:GO0]
+
+    if get(ENV, "LCGE_TEST_SOLVE", "false") == "true"
+        solve_model!(m; output="no", show_diagnostics=false)
+        @test termination_status(m) == JuMP.LOCALLY_SOLVED
+        @test isapprox(value(m[:RGDP]["R1"]), P[:GDP0]; rtol=1e-6)
+        @test isapprox(value(m[:Sg]), S_G; rtol=1e-6) && isapprox(value(m[:SAV]["HH"]), B[:SAV]; rtol=1e-6, atol=1e-6 * B[:YH])
+        # a 20 % tariff cut: C-6 holds on real GDP, C-10 on nominal GDP, gross output on its own
+        tm0 = copy(P[:tau_m]); for (k, v) in tm0; P[:tau_m][k] = 0.8 * v; end
+        mt = model(d; show_solver_output=false)
+        solve_model!(mt; output="no", show_diagnostics=false)
+        for (k, v) in tm0; P[:tau_m][k] = v; end
+        @test termination_status(mt) == JuMP.LOCALLY_SOLVED
+        @test isapprox(value(mt[:FD]["Gov"]), P[:chi_gov] * value(mt[:RGDP]["R1"]); rtol=1e-8)
+        @test isapprox(value(mt[:InvSh]), value(mt[:PFD]["Inv"]) * value(mt[:FD]["Inv"]) / value(mt[:GDP]["R1"]); rtol=1e-8)
+        @test isapprox(value(mt[:RGO]["R1"]), sum(value(mt[:XP][p]) for p in iset); rtol=1e-10)
+        @test isapprox(value(mt[:PGDP]["R1"]) * value(mt[:RGDP]["R1"]), value(mt[:GDP]["R1"]); rtol=1e-8)
+        @test isapprox(value(mt[:YD]["HH"]), sum(value(mt[:PC][k]) * value(mt[:XH][k, "HH"]) for k in d.sets[:k]) +
+                                             value(mt[:SAV]["HH"]); rtol=1e-8)
+        println("KEN_2018_hybrid: chi_gov = ", round(P[:chi_gov]; digits=4), " (G / gross output ",
+                round(col("GOV") / P[:GO0]; digits=4), "); -20 % tariffs: real GDP ",
+                round(100 * (value(mt[:RGDP]["R1"]) / P[:GDP0] - 1); digits=3), " %, real gross output ",
+                round(100 * (value(mt[:RGO]["R1"]) / P[:GO0] - 1); digits=3), " %")
     end
 end
 
