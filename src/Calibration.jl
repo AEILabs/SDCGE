@@ -109,12 +109,12 @@
 #     instead of PE (tau_e² · exports of revenue from nowhere).  kappa_h then took all
 #     household non-consumption and was a net transfer (< 0) on 38 of the 333 2023
 #     databases.
-# (7) TRANSFERS FROM ABROAD (2026-10-07).  Net current transfers to households are a lump
-#     sum fixed in real domestic terms, PAR[:WTRbar][h], valued at PNUM·PABS in Y-5 and paid
-#     through the balance of payments at the same value (C-BOP: CIF imports - FOB exports = Sf +
-#     PNUM·PABS·Σ WTRbar), so Sf is the current-account deficit.  It is neutral to the
-#     exchange rate; under bop_closure = :fixed_er (ER and PABS = 1 fixed) it is identical to a
-#     foreign-currency lump sum to first order.  WTRbar is the SAM's HH x ROW - ROW x HH, or,
+# (7) TRANSFERS FROM ABROAD (2026-10-07).  Net current transfers to households, PAR[:WTRbar][h],
+#     arrive as a fixed foreign-currency amount (C-BOP: CIF imports - FOB exports = Sf +
+#     PNUM·ER·Σ WTRbar, so Sf is the current-account deficit) and reach households as a lump sum
+#     fixed in real domestic terms (Y-5: PNUM·PABS·WTRbar); the government takes the
+#     exchange-rate valuation difference PNUM·(ER - PABS)·Σ WTRbar (C-4), zero at the benchmark
+#     and under bop_closure = :fixed_er (ER = PABS = 1).  WTRbar is the SAM's HH x ROW - ROW x HH, or,
 #     where the SAM has none (every exported SAM, 2026-10-07: GTAP folds remittances, aid and
 #     foreign borrowing into S - I = X - M) and households dissave (S_H < DeprY0, 40 of the 333
 #     2023 databases), the gap DeprY0 - S_H, with SAV0 = 0.  An explicit amount comes from
@@ -123,10 +123,13 @@
 #     dissaving it leaves stays in SAV0.  Before, the gap was a negative kappa_h, a transfer
 #     proportional to factor income (consumption moved 1 - kappa_h = 2.07 times household
 #     factor income on Lebanon gtap12, 3.10 on Kyrgyzstan gtap12).  Valued at the exchange
-#     rate instead, the imputed gap (54 % of household income on Lebanon, 68 % on Kyrgyzstan,
-#     aid, borrowing and data gaps as well as remittances) made a real appreciation cut
-#     household income one for one: +20 % foreign saving under :fixed_wage/:flex_er gave
-#     Lebanon -59 % real GDP and Kyrgyzstan's tariff and TFP runs stalled.  Under :balanced
+#     rate in household income, the imputed gap (54 % of household income on Lebanon, 68 % on
+#     Kyrgyzstan; aid, borrowing and data gaps as well as remittances) made a real appreciation
+#     cut household income one for one (+20 % foreign saving under :fixed_wage/:flex_er: Lebanon
+#     -59 % real GDP); valued in real domestic terms in C-BOP too, its foreign-currency value
+#     T/ER fell as ER rose and offset the trade balance's response to ER, so the current account
+#     barely pinned ER (Lebanon +2 % TFP and +20 % foreign saving, Kyrgyzstan +20 % foreign
+#     saving stalled under :fixed_wage/:flex_er; all LOCALLY_SOLVED with the split above).  Under :balanced
 #     (no current account) WTRbar = 0 and a transfer cell stays in kappa_h.
 
 # Benchmark elasticities.  The SAM carries no elasticity information, so every

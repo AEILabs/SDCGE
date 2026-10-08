@@ -60,8 +60,9 @@ function add_income_equations!(model, data::LinkageData, PAR)
     # (Y-5) Household income allocation across factor incomes, fiscal depreciation,
     # government transfers, and net foreign transfers.
     # Note: phi_* and TRG/WTRbar are calibrated/precomputed tables in PAR.  WTRbar, net
-    # transfers from abroad, is a lump sum fixed in real domestic terms, PNUM·PABS·WTRbar
-    # (Calibration.jl convention (7)); C-BOP pays the same value.
+    # transfers from abroad, reaches households as a lump sum fixed in real domestic terms,
+    # PNUM·PABS·WTRbar (Calibration.jl convention (7)); it arrives through C-BOP at a fixed
+    # foreign-currency value and C-4 books the difference to the government.
     @constraint(model, Y_5[hh in h], (YH[hh]) - (PAR[:phi_T][hh] * TY
           + PAR[:phi_F][hh] * FY
           + sum(PAR[:phi_L][(hh,ll)] * LY[ll] for ll in l)

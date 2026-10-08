@@ -39,10 +39,15 @@ function add_closure_equations!(model, data::LinkageData, PAR)
           + sum(PAR[:tau_k][(ii,vv)] * NR[ii,vv] * Kvd[ii,vv] for ii in i for vv in v)
           + sum(PAR[:tau_k][(ii,oldv)] * NR[ii,oldv] * Nfirm[ii] * KF_d[ii] for ii in i)) ⟂ YG)
 
-    # (C-4) Government saving / net fiscal position.
+    # (C-4) Government saving / net fiscal position.  The households' transfers from abroad
+    # arrive at a fixed foreign-currency value (C-BOP, PNUM·ER·WTRbar) and are paid out at a
+    # fixed real domestic value (Y-5, PNUM·PABS·WTRbar); the government takes the difference,
+    # the exchange-rate valuation gain or loss (zero under :fixed_er and at the benchmark).
+    trf_val = haskey(model, :ER) ? PNUM * (model[:ER] - model[:PABS]) * sum(PAR[:WTRbar][hh] for hh in h) : 0.0
     @constraint(model, C_4, (Sg) - (YG - PFD[gov]*FD[gov] - sum(PGDP[rr0]*PAR[:TRG][hh] for hh in h)
              + PNUM*sum(PAR[:WTRgov_in][(rrp,inn)] for rrp in rp for inn in ins)
-             - PNUM*sum(PAR[:WTRgov_out][(rrp,inn)] for rrp in rp for inn in ins)) ⟂ Sg)
+             - PNUM*sum(PAR[:WTRgov_out][(rrp,inn)] for rrp in rp for inn in ins)
+             + trf_val) ⟂ Sg)
 
     # (C-5) Real government saving.
     @constraint(model, C_5, (RSg) - (Sg / PGDP[rr0]) ⟂ RSg)
@@ -56,7 +61,7 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # payments, government balance} redundant: summing the household, government
     # and investment budgets with goods-market clearing (E-1) and the Armington /
     # CET duality identities gives
-    #     Σ WPM·WTFd − Σ WPE·WTFs − PNUM·PABS·Σ WTRbar  =  PFD[Inv]·FD[Inv] − (Σ SAV + Σ DeprY + Sg)
+    #     Σ WPM·WTFd − Σ WPE·WTFs − PNUM·ER·Σ WTRbar  =  PFD[Inv]·FD[Inv] − (Σ SAV + Σ DeprY + Sg)
     # identically.  C-9 and C-BOP are therefore the same restriction, and only one
     # of them may be imposed.
     #
@@ -96,12 +101,12 @@ function add_closure_equations!(model, data::LinkageData, PAR)
 
         # (C-BOP) Balance of payments of the home region, in world prices (domestic currency,
         # WPM = ER·PWM0): CIF import value minus FOB export value equals foreign saving (the
-        # current-account deficit) plus the households' net transfers from abroad, at the value
-        # Y-5 pays them (PNUM·PABS·WTRbar; in foreign currency that value over ER).
+        # current-account deficit) plus the households' net transfers from abroad, a fixed
+        # foreign-currency amount (C-4 books the valuation difference to Y-5's real value).
         bop_gap = @expression(model,
             sum(WPM[rrp,rr,ii] * WTFd[rrp,rr,ii] for ii in i for rr in r for rrp in rp)
             - sum(WPE[rr,rrp,ii] * WTFs[rr,rrp,ii] for ii in i for rr in r for rrp in rp)
-            - Sf[rr0] - PNUM * model[:PABS] * sum(PAR[:WTRbar][hh] for hh in h))
+            - Sf[rr0] - PNUM * ER * sum(PAR[:WTRbar][hh] for hh in h))
         if flex_er
             @constraint(model, C_BOP, (bop_gap) - (0.0) ⟂ ER)
         else

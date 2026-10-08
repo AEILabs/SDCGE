@@ -325,8 +325,10 @@ end
 # imported consumption R that is financed from abroad, either (a) by dissaving (HH x INV), which
 # is how the exported country SAMs book remittances, aid and borrowing (Lebanon, Kyrgyzstan, ...),
 # or (b) by an explicit transfer cell HH x ROW.  In (a) the gap DeprY0 - S_H becomes the transfer
-# and SAV0 = 0; in (b) the cell is the transfer.  Either way it is a lump sum fixed in real
-# domestic terms, PNUM·PABS·WTRbar (Y-5, C-BOP), and kappa_h is the households' tax rate.  Until 2026-10-07 the transfer was a
+# and SAV0 = 0; in (b) the cell is the transfer.  Either way households receive a lump sum fixed
+# in real domestic terms, PNUM·PABS·WTRbar (Y-5), the balance of payments a fixed foreign-currency
+# amount, PNUM·ER·WTRbar (C-BOP), the government the difference (C-4), and kappa_h is the
+# households' tax rate.  Until 2026-10-07 the transfer was a
 # negative kappa_h, proportional to factor income.
 @testset "transfers from abroad (lump sum)" begin
     function twelve(; kw...)
@@ -414,13 +416,13 @@ end
         solve_model!(mt; output="no", show_diagnostics=false)
         for (k, v) in tm0; PAR[:tau_m][k] = v; end
         @test termination_status(mt) == JuMP.LOCALLY_SOLVED
-        pv = value(mt[:PNUM]) * value(mt[:PABS]); wtr = da.par[:WTRbar]["HH"]
+        pv = value(mt[:PNUM]) * value(mt[:PABS]); ev = value(mt[:PNUM]) * value(mt[:ER]); wtr = da.par[:WTRbar]["HH"]
         @test abs(value(mt[:ER]) - 1) > 1e-4                               # the exchange rate moved ...
         @test abs(finet(mt) / finet(m) - 1) > 1e-3                         # factor income moved ...
         @test isapprox(value(mt[:YH]["HH"]) - finet(mt), pv * wtr; rtol=1e-8) # ... the transfer did not
         mw = sum(value(mt[:WPM][a, b, p]) * value(mt[:WTFd][a, b, p]) for a in ("R1",), b in ("R1",), p in iset)
         xw = sum(value(mt[:WPE][a, b, p]) * value(mt[:WTFs][a, b, p]) for a in ("R1",), b in ("R1",), p in iset)
-        @test isapprox(mw - xw - value(mt[:Sf]["R1"]), pv * wtr; rtol=1e-7)  # C-BOP
+        @test isapprox(mw - xw - value(mt[:Sf]["R1"]), ev * wtr; rtol=1e-7)  # C-BOP: foreign currency
         @test value(mt[:YC]["HH"]) == value(mt[:YD]["HH"]) ||
               isapprox(value(mt[:YC]["HH"]), value(mt[:YD]["HH"]); rtol=1e-10)
         @test isapprox(value(mt[:YD]["HH"]), sum(value(mt[:PC][k]) * value(mt[:XH][k, "HH"]) for k in da.sets[:k]) +
