@@ -116,7 +116,7 @@
 #     exchange-rate valuation difference PNUM·(ER - PABS)·Σ WTRbar (C-4), zero at the benchmark
 #     and under bop_closure = :fixed_er (ER = PABS = 1).  WTRbar is the SAM's HH x ROW - ROW x HH, or,
 #     where the SAM has none (every exported SAM, 2026-10-07: GTAP folds remittances, aid and
-#     foreign borrowing into S - I = X - M) and households dissave (S_H < DeprY0, 40 of the 333
+#     foreign borrowing into S - I = X - M) and households dissave (S_H < DeprY0, 49 of the 333
 #     2023 databases), the gap DeprY0 - S_H, with SAV0 = 0.  An explicit amount comes from
 #     transfers.csv next to a CSV SAM (`institution,value`, SAM units; prepare_data! folds it
 #     into the HH x ROW cell, moving it out of foreign saving into household saving), and any

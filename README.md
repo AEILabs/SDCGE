@@ -352,7 +352,7 @@ equations need, are documented in the header of `Calibration.jl`:
   too, it left the exchange rate barely pinned and Lebanon's and Kyrgyzstan's fixed-wage runs
   stalled.) They come from the SAM's `HH × ROW − ROW × HH`. The
   exported SAMs carry none: GTAP books remittances, aid and foreign borrowing in
-  `S − I = X − M`. So where households dissave (`S_H < DeprY0`, 40 databases), the gap is
+  `S − I = X − M`. So where households dissave (`S_H < DeprY0`, 49 databases), the gap is
   booked as the transfer and `SAV0 = 0`, with foreign saving lower by the same amount; foreign
   saving `Sf` is then the current-account deficit. A `transfers.csv` next to `sam.csv`
   (`institution,value`, `HH`, SAM units; or `prepare_data!(...; transfers_path=)`) sets the
