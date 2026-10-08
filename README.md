@@ -342,12 +342,15 @@ equations need, are documented in the header of `Calibration.jl`:
   investment). Until 2026-10-07 household saving was the macro residual (≈ 0) and `kappa_h`
   took all household non-consumption, negative on 38 of the 333 databases.
 - **Transfers from abroad** (convention (7)). Net current transfers to households are a lump
-  sum fixed in real domestic terms, `PAR[:WTRbar]`, valued at `PNUM·PABS` (Y-5) and paid
-  through the balance of payments at that value (`C_BOP`). It is neutral to the exchange rate;
-  under `bop_closure = :fixed_er` it is identical to a foreign-currency lump sum to first
-  order. (Valued at the exchange rate, the imputed gap, 54 % of household income on Lebanon,
-  made a real appreciation cut household income one for one: +20 % foreign saving under
-  `:fixed_wage`/`:flex_er` gave Lebanon −59 % real GDP.) They come from the SAM's `HH × ROW − ROW × HH`. The
+  sum fixed in real domestic terms, `PAR[:WTRbar]`, valued at `PNUM·PABS` (Y-5). They arrive
+  through the balance of payments as a fixed foreign-currency amount (`C_BOP`, `PNUM·ER·WTRbar`),
+  and the government takes the exchange-rate valuation difference `PNUM·(ER − PABS)·Σ WTRbar`
+  (C-4); under `bop_closure = :fixed_er` that difference is zero. (Valued at the exchange rate
+  in household income, the imputed gap, 54 % of household income on Lebanon, made a real
+  appreciation cut household income one for one: +20 % foreign saving under
+  `:fixed_wage`/`:flex_er` gave Lebanon −59 % real GDP; valued in domestic terms in `C_BOP`
+  too, it left the exchange rate barely pinned and Lebanon's and Kyrgyzstan's fixed-wage runs
+  stalled.) They come from the SAM's `HH × ROW − ROW × HH`. The
   exported SAMs carry none: GTAP books remittances, aid and foreign borrowing in
   `S − I = X − M`. So where households dissave (`S_H < DeprY0`, 40 databases), the gap is
   booked as the transfer and `SAV0 = 0`, with foreign saving lower by the same amount; foreign
@@ -423,7 +426,7 @@ calibration).
   are the benchmark (no rescale), and the current-account deficit is booked as
   exogenous foreign saving `Sfbar` (= CIF imports − FOB exports − export tax − net
   transfers to households, the SAM's `INV × ROW` net of `ROW × INV` less the transfer of
-  convention (7)). `C_BOP` (CIF imports − FOB exports = `Sf` + `PNUM·PABS·Σ WTRbar`)
+  convention (7)). `C_BOP` (CIF imports − FOB exports = `Sf` + `PNUM·ER·Σ WTRbar`)
   is imposed and the savings–investment balance C-9 is dropped, since by
   Walras' law it is the same restriction (`export_results!` reports its
   residual as `SI_gap`). Investment is then pinned by `C_INV`
@@ -586,6 +589,27 @@ good, for `:balanced`).
   (land supply becomes demand-determined: +141 % on KEN). See the `Factors.jl`
   header for the measurements and for the closure experiment that was tried and
   rejected.
+- **`:fixed_wage` + `:flex_er` on transfer-financed databases** (2026-10-08). Kyrgyzstan
+  `gtap12`'s −20 % tariff and +2 % TFP runs end in `SLOW_PROGRESS` (25–145 s, residual ~50–90 at
+  the 1e5 scale and at the raw scale, not the time limit); every other run on Kenya, Lebanon,
+  Kyrgyzstan and Cape Verde solves, and the default closures (`:full_employment`, `:wage_floor`
+  with `:fixed_er`) solve all of them. The cause is demand feedback: households with an imputed
+  transfer save nothing at the margin (`SAV0 = 0`), and C-6 ties government demand to real GDP
+  (36 % of it on Kyrgyzstan). Under the fixed wage, output is demand-determined (labour at
+  `W = 1`, new capital at `TR = 1`, no labour-force cap), so induced spending is close to one
+  per unit of GDP and the equilibrium is near-singular. With real government demand held
+  fixed (a diagnostic, not committed) the same tariff run is `LOCALLY_SOLVED` in 4 s. Before
+  2026-10-07 the induced spending exceeded one per unit of GDP (consumption moved 3.1× factor
+  income), which is why the fixed-wage closure turned tariff cuts into contractions there.
+  Treat this combination on transfer-heavy databases as unsupported.
+- **`:balanced` + `:fixed_wage` dynamics are indeterminate** (pre-existing). Under `:balanced`,
+  C-9 and good-by-good trade balance make one equation redundant, and the free `TR` direction
+  (F-21 `TR = TR`) absorbs it; the 2026-10-04 fixed-wage repairs apply under `:bop` only. On the
+  bundled synthetic SAM at the 1e5 scale, a baseline with 1 %/yr TFP on main `16fd6c7` itself
+  gives real GDP 271,922 → 265,645 → 143,386 (−47 %) → 267,945, every period
+  `LOCALLY_SOLVED` with `TR` 0.9932. A +2 % TFP shock from the second period therefore lands
+  anywhere (main: −14 % in its first period, unscaled). This branch shows the same behaviour
+  (baseline period 3 −51 %). Use `:bop` (the default) for dynamic runs.
 - **Transfers imputed from dissaving.** No exported SAM carries a transfer cell, so the transfer
   booked where households dissave (convention (7)) is everything that finances the gap:
   remittances, aid and foreign borrowing alike, all held fixed in real domestic terms. GTAP 12's

@@ -177,7 +177,7 @@ household column, `src/Calibration.jl:152`).
 | `HH` × factor rows | Factor income paid out to the household (all factor income routes through `HH`) |
 | `GOV` × tax rows | Tax revenue paid out to government |
 | `INV` × `HH`/`GOV`/`ROW` (net of the transposed cells) | Household saving `S_H`, government saving `S_G`, foreign saving: the benchmark reproduces `S_H` and `S_G` (`Calibration.jl` convention (6)) |
-| `HH` × `ROW` (net of `ROW` × `HH`) | Net current transfers from abroad to households, a lump sum fixed in real domestic terms (`WTRbar`, convention (7)); a `transfers.csv` next to `sam.csv` (`institution,value`, `HH`, SAM units) is folded into this cell on read |
+| `HH` × `ROW` (net of `ROW` × `HH`) | Net current transfers from abroad to households (`WTRbar`, convention (7)): a fixed foreign-currency amount in the balance of payments, a lump sum fixed in real domestic terms in household income; a `transfers.csv` next to `sam.csv` (`institution,value`, `HH`, SAM units) is folded into this cell on read |
 | `TAX_OUT` × `HH`/`GOV`/`INV` | Final-demand taxes: the households' is inside `kappa_h`, government's and investment's are `tau_Af` |
 
 ### 2.4 Balance requirement and RAS
