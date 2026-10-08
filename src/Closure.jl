@@ -12,7 +12,7 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     WPE=model[:WPE]; WPM=model[:WPM]; PE=model[:PE]; WTFd=model[:WTFd]; WTFout=model[:WTFout]; WTFs=model[:WTFs]; TauPR=model[:TauPR]
     NW=model[:NW]; LV=model[:LV]; Nfirm=model[:Nfirm]; LF_d=model[:LF_d]; NPT=model[:NPT]; Td=model[:Td]
     NR=model[:NR]; Kvd=model[:Kvd]; KF_d=model[:KF_d]; YH=model[:YH]; FDInvVar=model[:FDInv]
-    RGDP=model[:RGDP]
+    RGDP=model[:RGDP]; GDP=model[:GDP]
 
     oldv = ("Old" in v) ? "Old" : first(v)
     gov = ("Gov" in f) ? "Gov" : first(f)
@@ -47,7 +47,8 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # (C-5) Real government saving.
     @constraint(model, C_5, (RSg) - (Sg / PGDP[rr0]) ⟂ RSg)
 
-    # (C-6) Government expenditure volume as share of real GDP at market prices.
+    # (C-6) Government expenditure volume as share of real GDP at market prices (GDPMPr = RGDP,
+    # M-2; until 2026-10-07 real gross output Σ XP).
     @constraint(model, C_6, (FD[gov]) - (PAR[:chi_gov] * GDPMPr) ⟂ FD[gov])
 
     # ── C-7 / C-9 / C-BOP: the macro closure ─────────────────────────────────
@@ -130,8 +131,9 @@ function add_closure_equations!(model, data::LinkageData, PAR)
         end
     end
 
-    # (C-10) Investment share of GDP at market prices.
-    @constraint(model, C_10, (InvSh) - (PFD[inv] * FD[inv] / GDPMPr) ⟂ InvSh)
+    # (C-10) Investment share of nominal GDP at market prices (M-1; until 2026-10-07 nominal
+    # investment over real gross output).
+    @constraint(model, C_10, (InvSh) - (PFD[inv] * FD[inv] / GDP[rr0]) ⟂ InvSh)
 
     # C-11 REMOVED: PNUM is already pinned to 1 by M_5 in Other.jl (numeraire).
     # Including C_11 here would give PNUM two equations simultaneously.
@@ -139,9 +141,8 @@ function add_closure_equations!(model, data::LinkageData, PAR)
     # (C-12) World average rate of return to capital.
     @constraint(model, C_12, (WRR) - (sum(PAR[:TR_region][rr] * PAR[:K_region][rr] for rr in r) / sum(PAR[:K_region][rr] for rr in r)) ⟂ WRR)
 
-    # GDPMPr: real GDP at market prices used in C_6 for government expenditure.
-    # Defined as real GDP of the first region (RGDP is the regional real GDP
-    # index computed in M_2 of Other.jl).
+    # GDPMPr: real GDP at market prices used in C_6 for government expenditure: real GDP of the
+    # first region (M-2 in Other.jl, the expenditure side at the benchmark's prices).
     @constraint(model, C_GDPMPr, (GDPMPr) - (RGDP[rr0]) ⟂ GDPMPr)
 
     return model

@@ -294,7 +294,7 @@ function calibrate_from_sam!(data::LinkageData)
     HH0     = max(sum(values(C0)), EPS)
     GOV0    = max(sum(values(G0)), EPS)
     INVEST0 = max(sum(values(I0)), EPS)
-    GDP0    = sum(values(X))
+    GO0     = sum(values(X))                        # gross output (GO/RGO at the benchmark)
 
     # ── 6. Factor incomes, tax revenue and the direct-tax closure ───────────
     delta_f = 0.05                                  # Y-6 depreciation rate
@@ -561,6 +561,20 @@ function calibrate_from_sam!(data::LinkageData)
         par[:a_f][(p,"Gov")] = G0[p]/GOV0
         par[:a_f][(p,"Inv")] = I0[p]/INVEST0
     end
+    # ── GDP at market prices (M-1..M-3), expenditure side ───────────────────
+    # The benchmark prices real GDP (M-2) values every period's volumes at: household purchases
+    # PAc0 = 1 + tau_Ac (= 1: no SAM account), government and investment PFD0 = 1 + tau_Af, and
+    # the world prices WPE0/WPM0 (= the benchmark's WPE/WPM below).  At the benchmark nominal and
+    # real GDP are C + PFD0_gov·G + PFD0_inv·I + FOB exports - CIF imports.
+    wpe0 = Dict(p => 1.0 + tau_e for p in i)
+    wpm0 = Dict(p => trade_closure === :balanced ? (1.0 + tau_e)/lam_w[p] : 1.0/(1.0 + tau_m_s[p]) for p in i)
+    GDP0 = HH0 + PFD0["Gov"]*GOV0 + PFD0["Inv"]*INVEST0 + sum(wpe0[p]*ES0[p] - wpm0[p]*XMT0[p] for p in i)
+    par[:PAc0] = Dict{Any,Float64}((p,hh) => 1.0 for p in i for hh in h)
+    par[:PFD0] = Dict{Any,Float64}(ff => get(PFD0, ff, 1.0) for ff in f)
+    par[:WPE0] = Dict{Any,Float64}((rr,rrp,p) => wpe0[p] for rr in r for rrp in rp for p in i)
+    par[:WPM0] = Dict{Any,Float64}((rr,rrp,p) => wpm0[p] for rr in r for rrp in rp for p in i)
+    # C-6: real government demand is a share of real GDP (Kenya gtap12 12.4 %; 6.6 % of gross
+    # output when C-6 was on gross output, before 2026-10-07).
     par[:chi_gov] = GOV0/max(GDP0,EPS)
     # C-INV (only imposed under :bop): exogenous real investment, plus the share
     # of real GDP that `update_period_data!` re-bases it on between periods.
@@ -584,7 +598,7 @@ function calibrate_from_sam!(data::LinkageData)
 
     # Macro anchors used elsewhere (RecursiveDynamic, PolicyScenarios, reports).
     par[:TY0]=TY0; par[:FY0]=FY0; par[:KY0]=KY0; par[:LY0]=LY0
-    par[:GDP0]=GDP0; par[:RGDP0]=GDP0; par[:PGDP0]=1.0
+    par[:GDP0]=GDP0; par[:RGDP0]=GDP0; par[:PGDP0]=1.0; par[:GO0]=GO0
     par[:INVEST0]=INVEST0; par[:GOV0]=GOV0; par[:HH0]=HH0
     par[:YH0]=Dict(hh => YH0 for hh in h)
     par[:YG0]=YG0; par[:Sg0]=Sg0
@@ -618,16 +632,14 @@ function calibrate_from_sam!(data::LinkageData)
     B[:TY]=TY0; B[:FY]=FY0; B[:KY]=KY0; B[:LY]=LY0
     B[:YH]=YH0; B[:YD]=YD0; B[:YC]=YC0; B[:SAV]=SAV0; B[:YSTAR]=YC0; B[:S_H]=S_H0
     B[:DeprY]=DeprY0; B[:YG]=YG0; B[:Sg]=Sg0; B[:TarY]=TarY0
-    B[:GDP]=GDP0; B[:InvSh]=INVEST0/max(GDP0,EPS)
+    B[:GDP]=GDP0; B[:GO]=GO0; B[:InvSh]=PFD0["Inv"]*INVEST0/max(GDP0,EPS)
     B[:HH]=HH0; B[:GOV]=GOV0; B[:INV]=INVEST0
     B[:PFD]=Dict(ff => get(PFD0, ff, 1.0) for ff in f)
     B[:KS]=sum(cap[p] for p in i)
     B[:KSs]=Dict(p => cap[p] for p in i)
     B[:TLnd]=tot_land
     B[:kappa]=kappa; B[:tau_e]=tau_e
-    B[:WPE]=Dict(p => 1.0 + tau_e for p in i)
-    B[:WPM]=Dict(p => trade_closure === :balanced ? (1.0 + tau_e)/lam_w[p] :
-                      1.0/(1.0 + tau_m_s[p]) for p in i)
+    B[:WPE]=wpe0; B[:WPM]=wpm0
     B[:ER]=1.0; B[:Sf]=Sf0
     par[:bench] = B
 

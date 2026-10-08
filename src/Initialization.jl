@@ -231,7 +231,7 @@ function initialize_from_sam!(model, data::LinkageData)
     # ── Prices at the benchmark normalisation ────────────────────────────────
     # Unit prices everywhere except the tax wedges PX = 1/(1+tau_p) and
     # PND = PEp = Pfert = Pfeed = PAp = 1 + tau_Ap (see Calibration.jl header).
-    for nm in [:PP, :PA, :PD, :PMT, :PET, :PT, :NPT, :PF, :PC, :CPI, :PGDP,
+    for nm in [:PP, :PA, :PD, :PMT, :PET, :PT, :NPT, :PF, :PC, :CPI, :PGDP, :PGO,
                :PVA, :PHKTEF, :PHKTE, :PHKT, :PKT, :PKTEL, :PTFD, :R, :NR]
         haskey(model, nm) || continue
         obj = model[nm]
@@ -477,6 +477,9 @@ function initialize_from_sam!(model, data::LinkageData)
         _safe_start_value!(model, :RGDP, (rr,), B[:GDP])
         _safe_start_value!(model, :CPI,  (rr,), 1.0)
         _safe_start_value!(model, :PGDP, (rr,), 1.0)
+        _safe_start_value!(model, :GO,   (rr,), B[:GO])
+        _safe_start_value!(model, :RGO,  (rr,), B[:GO])
+        _safe_start_value!(model, :PGO,  (rr,), 1.0)
     end
 
     for gg in gz

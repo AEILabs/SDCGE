@@ -142,11 +142,14 @@ function add_variables!(model, data::LinkageData)
         APMg[r]  >= 0
 
         # ── Macro aggregates ──────────────────────────────────────────────────
-        GDP[r]   >= 0
-        RGDP[r]  >= 0
+        GDP[r]   >= 0       # nominal GDP at market prices (M-1, expenditure side)
+        RGDP[r]  >= 0       # real GDP at the benchmark's prices (M-2)
         CPI[r]   >= 0
-        PGDP[r]  >= 0
-        GDPMPr   >= 0       # real GDP at market prices; defined in Closure.jl
+        PGDP[r]  >= 0       # GDP deflator (M-3)
+        GO[r]    >= 0       # nominal gross output Σ PP·XP
+        RGO[r]   >= 0       # real gross output Σ XP
+        PGO[r]   >= 0       # gross-output deflator
+        GDPMPr   >= 0       # real GDP at market prices (= RGDP of the home region; C-6)
 
         # ── Closure / fiscal ──────────────────────────────────────────────────
         TarY   >= 0

@@ -304,7 +304,11 @@ function precompute_parameters(data::LinkageData)
     _fill!(PAR, :PWE0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
     _fill!(PAR, :PWM0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
     _fill!(PAR, :WTF0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
+    # Benchmark prices of real GDP (M-2; Calibration.jl sets them).
     _fill!(PAR, :WPE0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
+    _fill!(PAR, :WPM0, [(rr,rrp,ii) for rr in r for rrp in rp for ii in i], 1.0)
+    _fill!(PAR, :PAc0, [(ii,hh) for ii in i for hh in h], 1.0)
+    _fill!(PAR, :PFD0, f, 1.0)
     _fill!(PAR, :TR_region, r, 1.0)
     _fill!(PAR, :K_region, r, 1.0)
 

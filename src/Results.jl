@@ -246,7 +246,7 @@ function export_results!(m, data::LinkageData; outdir::AbstractString="results")
         "W", "NW", "AVGW", "TW", "WMIN",
         "R", "NR", "TR", "CHIv",
         # Macro aggregates
-        "GDP", "RGDP", "CPI", "PGDP", "GDPMPr",
+        "GDP", "RGDP", "CPI", "PGDP", "GDPMPr", "GO", "RGO", "PGO",
         # Income / expenditure / savings
         "YH", "YD", "YC", "YSTAR", "SAV", "DeprY", "CPIH",
         "TY", "FY", "KY", "LY",
@@ -378,9 +378,12 @@ function _lcge_macro_summary_rows(m, data::LinkageData)
 
     # ── Macro aggregates per region ───────────────────────────────────────────
     for rr in r
-        _push("GDP_$(rr)",  "Nominal GDP at producer prices, region $(rr)",                 _v(:GDP,(rr,)),  _vs(:GDP,(rr,)))
-        _push("RGDP_$(rr)", "Real GDP (Σ XP), region $(rr)",                                _v(:RGDP,(rr,)), _vs(:RGDP,(rr,)))
-        _push("PGDP_$(rr)", "GDP deflator GDP/RGDP, region $(rr)",                          _v(:PGDP,(rr,)), _vs(:PGDP,(rr,)))
+        _push("GDP_$(rr)",  "Nominal GDP at market prices, C+G+I+X-M (M_1), region $(rr)",  _v(:GDP,(rr,)),  _vs(:GDP,(rr,)))
+        _push("RGDP_$(rr)", "Real GDP at benchmark prices (M_2), region $(rr)",             _v(:RGDP,(rr,)), _vs(:RGDP,(rr,)))
+        _push("PGDP_$(rr)", "GDP deflator GDP/RGDP (M_3), region $(rr)",                    _v(:PGDP,(rr,)), _vs(:PGDP,(rr,)))
+        _push("GO_$(rr)",   "Nominal gross output Σ PP·XP, region $(rr)",                   _v(:GO,(rr,)),   _vs(:GO,(rr,)))
+        _push("RGO_$(rr)",  "Real gross output Σ XP, region $(rr)",                         _v(:RGO,(rr,)),  _vs(:RGO,(rr,)))
+        _push("PGO_$(rr)",  "Gross-output deflator GO/RGO, region $(rr)",                   _v(:PGO,(rr,)),  _vs(:PGO,(rr,)))
         _push("CPI_$(rr)",  "Consumer price index (avg PC), region $(rr)",                  _v(:CPI,(rr,)),  _vs(:CPI,(rr,)))
     end
 
@@ -403,7 +406,7 @@ function _lcge_macro_summary_rows(m, data::LinkageData)
           (haskey(m,:PFD) && haskey(m,:FD)) ? (_v(:PFD,("Inv",))*_v(:FD,("Inv",))) : missing,
           (haskey(m,:PFD) && haskey(m,:FD)) ? (_vs(:PFD,("Inv",))*_vs(:FD,("Inv",))) : missing)
     _push("FDInv",    "Investment quantity FDInv (F_31)",                                   _v(:FDInv),      _vs(:FDInv))
-    _push("InvSh",    "Investment / GDP ratio (C_10)",                                      _v(:InvSh),      _vs(:InvSh))
+    _push("InvSh",    "Investment / nominal GDP (C_10)",                                    _v(:InvSh),      _vs(:InvSh))
 
     # ── Tax revenue components (TAXREV ≈ YG = sum of all tax flows) ──────────
     _push("TAXREV",   "Total tax revenue ≈ YG (legacy TAXREV)",                             _v(:YG),         _vs(:YG))

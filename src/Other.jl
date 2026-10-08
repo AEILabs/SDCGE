@@ -7,16 +7,35 @@ function add_other_equations!(model, data::LinkageData, PAR)
     cr=S[:cr]; lv=S[:lv]; ip=S[:ip]; e=S[:e]; ft=S[:ft]; fd=S[:fd]; nf=S[:nf]; nnft=S[:nnft]; nnfd=S[:nnfd]; gz=S[:gz]
 
     GDP=model[:GDP]; RGDP=model[:RGDP]; CPI=model[:CPI]; PGDP=model[:PGDP]; PNUM=model[:PNUM]; XP=model[:XP]; PP=model[:PP]; PC=model[:PC]
+    GO=model[:GO]; RGO=model[:RGO]; PGO=model[:PGO]
     GOVDEM=model[:GOVDEM]; INVDEM=model[:INVDEM]; PA=model[:PA]; PAp=model[:PAp]; XAf=model[:XAf]
+    XAc=model[:XAc]; PAc=model[:PAc]; FD=model[:FD]; PFD=model[:PFD]
+    WPE=model[:WPE]; WPM=model[:WPM]; WTFs=model[:WTFs]; WTFd=model[:WTFd]
 
-    # (M-1) Nominal GDP at producer prices: sum of gross output valued at gross output prices.
-    @constraint(model, M_1[rr in r], (GDP[rr]) - (sum(PP[ii]*XP[ii] for ii in i)) ⟂ GDP[rr])
+    # GDP at market prices, expenditure side: household purchases, government and investment
+    # demand, FOB exports less CIF imports (valued as C-BOP values them).  The SAM has no
+    # regional dimension, so every region carries the national value.  Before 2026-10-07 M-1..M-3
+    # were gross output; that is GO/RGO/PGO below.
+    # (M-1) Nominal GDP.
+    @constraint(model, M_1[rr in r], (GDP[rr]) - (sum(PAc[ii,hh]*XAc[ii,hh] for ii in i for hh in h)
+          + sum(PFD[ff]*FD[ff] for ff in f)
+          + sum(WPE[r1,r2,ii]*WTFs[r1,r2,ii] for ii in i for r1 in r for r2 in rp)
+          - sum(WPM[r2,r1,ii]*WTFd[r2,r1,ii] for ii in i for r1 in r for r2 in rp)) ⟂ GDP[rr])
 
-    # (M-2) Real GDP index: unweighted sum of gross output volumes (base-year prices implicit in calibration).
-    @constraint(model, M_2[rr in r], (RGDP[rr]) - (sum(XP[ii] for ii in i)) ⟂ RGDP[rr])
+    # (M-2) Real GDP: the same volumes at the benchmark's prices (fixed-base Laspeyres), PAc0 =
+    # 1 + tau_Ac, PFD0 = Σ a_f·(1 + tau_Af), WPE0/WPM0 the benchmark world prices (Calibration.jl).
+    @constraint(model, M_2[rr in r], (RGDP[rr]) - (sum(PAR[:PAc0][(ii,hh)]*XAc[ii,hh] for ii in i for hh in h)
+          + sum(PAR[:PFD0][ff]*FD[ff] for ff in f)
+          + sum(PAR[:WPE0][(r1,r2,ii)]*WTFs[r1,r2,ii] for ii in i for r1 in r for r2 in rp)
+          - sum(PAR[:WPM0][(r2,r1,ii)]*WTFd[r2,r1,ii] for ii in i for r1 in r for r2 in rp)) ⟂ RGDP[rr])
 
-    # (M-3) GDP implicit price deflator: PGDP * RGDP = GDP, for all regions.
+    # (M-3) GDP deflator: PGDP * RGDP = GDP.
     @constraint(model, M_3[rr in r], (PGDP[rr]*RGDP[rr]) - (GDP[rr]) ⟂ PGDP[rr])
+
+    # Gross output, nominal (GO = Σ PP·XP), real (RGO = Σ XP, unweighted volumes) and its deflator.
+    @constraint(model, M_GO[rr in r], (GO[rr]) - (sum(PP[ii]*XP[ii] for ii in i)) ⟂ GO[rr])
+    @constraint(model, M_RGO[rr in r], (RGO[rr]) - (sum(XP[ii] for ii in i)) ⟂ RGO[rr])
+    @constraint(model, M_PGO[rr in r], (PGO[rr]*RGO[rr]) - (GO[rr]) ⟂ PGO[rr])
 
     # (M-4) Consumer price index: unweighted average of bundle prices across the k consumption bundles.
     @constraint(model, M_4[rr in r], (CPI[rr]) - (sum(PC[kk] for kk in k)/length(k)) ⟂ CPI[rr])
