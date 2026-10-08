@@ -486,7 +486,8 @@ and a 20 % tariff cut on Kenya 2023 *lowers* real gross output (ΣXP) 4.3 % with
 13 % (zero tariffs does not converge). The first `:wage_floor` build scales the labour force in the
 parameter table; build another closure from a fresh `prepare_data!` if it must stay unscaled.
 
-Batch on the 333 country databases (2026-10-08, main `16fd6c7` = `4de52d8` plus docs, on the
+Batch on the 333 country databases (**pre-fix**: measured before the household-income, transfer and GDP
+fixes of 2026-10-07, which change these numbers; a re-validation on the merged branch follows) (2026-10-08, main `16fd6c7` = `4de52d8` plus docs, on the
 data pipeline's exports with the value-added floor; SAM at the simulator's benchmark scale,
 largest flow 1e5; `~/Documents/Data/CGE/validation/sdcge_closure_check/`): real GDP on the
 expenditure side at benchmark prices (`real_gdp_pct`, as the simulator computes it since P29;
