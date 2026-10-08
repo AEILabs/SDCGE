@@ -40,13 +40,17 @@ The model is written as a square **mixed complementarity problem (MCP)** in
   (median 1.2 %; production-nest residuals of tiny activities). The 2017 GTAP Africa V3 and 2018
   hybrid databases cited in older notes (e.g. `KEN_2017_gtap11afr`) are no longer exported;
   regenerate one with `Rscript R/09_export_sdcge.R gtap11afr 2017 KEN` if needed.
-- **The savings–investment account closes on every database** (2026-10-06). Government revenue
-  `YG` may be negative (see "Calibration conventions"): on 11 remittance-heavy SAMs (Lebanon,
-  Syria, Kyrgyzstan, Tajikistan, Nepal, Comoros, Somalia, Iran, Togo) the benchmark needs it,
-  and the solved benchmark used to miss C-9 by up to 25.7 × investment; it is now within 2e-8.
-  The 133-sector hybrids of Kyrgyzstan, Laos, Nepal and Pakistan, which no closure solved, now
-  solve their benchmark under all three labour closures, and a −20 % tariff run under all three
-  (Nepal: not under `:full_employment`).
+- **Household income, saving, transfers and GDP** (2026-10-07, branch `fix/household-income`; see
+  "Calibration conventions", "GDP and gross output" and "What changed for users"). The benchmark
+  reproduces the SAM's household and government saving and closes C-9 to ~1e-9 of investment
+  (solved, 1e5 and raw scale); transfers from abroad are a lump sum fixed in real domestic terms, so
+  `kappa_h` is a tax rate again (it was a net transfer on 38 databases); `GDP`/`RGDP`/`PGDP` are
+  GDP at market prices (they were gross output, now `GO`/`RGO`/`PGO`), and C-6 ties government
+  demand to real GDP.
+- **The savings–investment account closes on every database** (2026-10-06). The 133-sector
+  hybrids of Kyrgyzstan, Laos, Nepal and Pakistan, which no closure solved, solve their
+  benchmark under all three labour closures, and a −20 % tariff run under all three (Nepal: not
+  under `:full_employment`).
 - **The benchmark replicates**: every equation holds at the calibrated start
   values, PATH reports `LOCALLY_SOLVED` after one major iteration (≈4 s).
 - Recursive dynamics keep an explicit capital stock (`Kstock0 = I0/δ`,
@@ -320,34 +324,86 @@ equations need, are documented in the header of `Calibration.jl`:
   investment demand are scaled down (≈12 % for the synthetic SAM, which has a
   7,439 deficit at border prices) so that absorption equals output minus
   exports plus imports. Intermediate demand, production and factor payments
-  keep their SAM values in both cases. The direct-tax rate is solved so that
-  investment is financed (`kappa_h`).
+  keep their SAM values in both cases.
 - **Land is agricultural only** (the factor equations force zero land outside
   `S[:ag]`); land payments the synthetic SAM assigns to other sectors are
   reassigned to capital.
 - **Subsistence quantities `theta = 0`** (LES collapses to proportional
   budget shares); trade margins are zero at the benchmark (`zeta_t = 0`).
-- **Institutions and government revenue** (convention (6) in the header). The SAM's
-  institution block is not read cell by cell: final demand, factor income, the activity and
-  trade taxes and the trade deficit are, and household saving is the macro residual, which a
-  balanced SAM makes zero. The direct-tax rate `kappa_h` therefore takes whatever households
-  do not consume, all domestic saving except depreciation (`DeprY = 0.05·KY`) is government
-  saving, and the benchmark revenue is `YG0 = Tother + FDtax_H + S_H − DeprY0`
-  (= `G + I − DeprY0 − Sf0`), with `S_H` the SAM's household saving. Transfers (`HH`/`GOV` ×
-  `ROW`, `HH` × `GOV`, …) are folded in the same way: a remittance is part of the trade
-  deficit and of what households spend. Where households dissave in the SAM, `kappa_h < 0` is
-  a net transfer to households (38 of the 333 2023 databases), and where it exceeds every
-  other tax, `YG0 < 0` — 11 databases: Lebanon (`gtap12` −25.7 × investment, `hybrid133`
-  −22.6), Syria −3.0, Kyrgyzstan −2.1, Comoros `hybrid133` −0.62, Tajikistan −0.39, Nepal
-  `hybrid133` −0.26, Somalia `hybrid`/`hybrid133` −0.26, Iran `hybrid133` −0.11, Togo −0.03.
-  `YG` is a free variable since 2026-10-06; until then it was bounded at 1e-8 and the solved
-  benchmark of those 11 missed C-9 by `YG0` (the real solution was unaffected under `:bop`
-  with fixed investment, which drops C-9; under `inv_closure = :savings` investment did not
-  replicate).
+- **Saving and taxes** (convention (6) in the header, 2026-10-07). The benchmark reproduces
+  the SAM's household saving `S_H` (`INV × HH − HH × INV`) and government saving `S_G`
+  (`INV × GOV − GOV × INV`): `SAV0 = S_H − DeprY0` (household gross saving `SAV + DeprY` is
+  `S_H`; `DeprY = 0.05·KY`), disposable income `YD0 = C + SAV0`, and the direct-tax rate
+  `kappa_h = 1 − YD0/YH0`, which is the households' final-demand tax (`TAX_OUT × HH`; the
+  exported SAMs carry no other direct tax) over their income: 0.4 % on Kenya `gtap12`, 5.5 % on
+  Lebanon. The final-demand taxes of government and investment (`TAX_OUT × GOV/INV`) are read
+  as `tau_Af`, so `PFD = 1 + tau_Af` at the benchmark. With zero subsistence, `1 − Σ mu_c` is
+  the household saving rate. C-9 then holds identically at the benchmark (to ~1e-14 of
+  investment). Until 2026-10-07 household saving was the macro residual (≈ 0) and `kappa_h`
+  took all household non-consumption, negative on 38 of the 333 databases.
+- **Transfers from abroad** (convention (7)). Net current transfers to households are a lump
+  sum fixed in real domestic terms, `PAR[:WTRbar]`, valued at `PNUM·PABS` (Y-5) and paid
+  through the balance of payments at that value (`C_BOP`). It is neutral to the exchange rate;
+  under `bop_closure = :fixed_er` it is identical to a foreign-currency lump sum to first
+  order. (Valued at the exchange rate, the imputed gap, 54 % of household income on Lebanon,
+  made a real appreciation cut household income one for one: +20 % foreign saving under
+  `:fixed_wage`/`:flex_er` gave Lebanon −59 % real GDP.) They come from the SAM's `HH × ROW − ROW × HH`. The
+  exported SAMs carry none: GTAP books remittances, aid and foreign borrowing in
+  `S − I = X − M`. So where households dissave (`S_H < DeprY0`, 40 databases), the gap is
+  booked as the transfer and `SAV0 = 0`, with foreign saving lower by the same amount; foreign
+  saving `Sf` is then the current-account deficit. A `transfers.csv` next to `sam.csv`
+  (`institution,value`, `HH`, SAM units; or `prepare_data!(...; transfers_path=)`) sets the
+  amount explicitly; it is folded into the `HH × ROW` cell, and any dissaving it leaves stays
+  in `SAV0`. Under `:balanced` (no exchange rate) no transfer is modelled.
 - **An input tax on a sector that buys no intermediate inputs** (`TAX_INT` × `ACT` with an
   empty `COM` × `ACT` column) is booked as that sector's output tax: as a rate on inputs it
   would be `txi/1e-9`. Four 133-sector hybrids (Kyrgyzstan, Laos, Nepal, Pakistan 2023) carry
   one; their benchmarks failed under every closure until 2026-10-06.
+
+## GDP and gross output
+
+Since 2026-10-07 `GDP`, `RGDP` and `PGDP` are GDP (`Other.jl` M-1..M-3), on the expenditure
+side at market prices:
+
+    GDP  = Σ PAc·XAc + Σ_f PFD·FD + Σ WPE·WTFs − Σ WPM·WTFd            (M-1, nominal)
+    RGDP = Σ PAc0·XAc + Σ_f PFD0·FD + Σ WPE0·WTFs − Σ WPM0·WTFd        (M-2, benchmark prices)
+    PGDP = GDP / RGDP                                                  (M-3)
+
+i.e. household purchases, government and investment demand, FOB exports less CIF imports; the
+benchmark prices `PAc0 = 1 + tau_Ac`, `PFD0 = Σ a_f·(1 + tau_Af)`, `WPE0`, `WPM0` are calibrated
+into `PAR`, so a shock to a tax rate does not move them. This is the measure the EPS app has
+computed itself since its P29. Until then the three were gross output; they are now `GO = Σ PP·XP`,
+`RGO = Σ XP` and `PGO = GO/RGO` (in `results_dataframe`, `export_results!` and the period
+summaries as `GO_R1`, `RGO_R1`, `PGO_R1`). C-6 sets real government demand
+`FD[Gov] = chi_gov · RGDP`, so `chi_gov` is government demand's share of real GDP (Kenya
+`gtap12` 0.124; it was 0.066 of gross output), and `chi_inv`, which `update_period_data!` uses
+to re-base investment between periods, is investment's. C-10 `InvSh` is investment's share of
+nominal GDP. Every region of a multi-region build carries the national value.
+
+### What changed for users (2026-10-07)
+
+- `GDP_R1`, `RGDP_R1`, `PGDP_R1` (and the `GDP`, `RGDP`, `PGDP` variable families) are GDP now;
+  the old gross-output numbers are `GO_R1`, `RGO_R1`, `PGO_R1` (`GO`, `RGO`, `PGO`).
+- `PAR[:chi_gov]` is government demand's share of real GDP, about twice its old value (Kenya
+  `gtap12` 0.124, was 0.066); a lever that sets it to an absolute level must be re-based.
+  `PAR[:chi_inv]` likewise; between periods investment now follows real GDP. `InvSh` is
+  investment over nominal GDP.
+- `PAR[:kappa_h]` is a tax rate (the households' final-demand tax over their income, ≥ 0; Kenya
+  0.4 %, Lebanon 5.5 %); it used to be the residual of household non-consumption, a net transfer
+  on 38 databases.
+- `SAV` is the SAM's household saving net of depreciation (a free variable), `Sg` the SAM's
+  government saving (Kenya −7,416 at the 1e5 scale, was 1,065), `YG` includes the final-demand
+  taxes of government and investment (`tau_Af`; `PFD = 1 + tau_Af` at the benchmark) and no
+  longer the overstated export tax.
+- `Sf` and `PAR[:Sfbar]` are the current-account deficit net of transfers to households
+  (`PAR[:WTRbar]`, new). Where households dissave the transfer is imputed and `Sfbar` falls by
+  it, below zero on Lebanon and Kyrgyzstan, so a foreign-saving shock stated as a percentage
+  of `Sfbar` changes sign there: state it on `Sfbar + Σ WTRbar` (the SAM's `INV × ROW`).
+- New: `transfers.csv` / `prepare_data!(...; transfers_path=)`, `read_transfers_csv`,
+  `fold_transfers!`.
+- Under `:bop` with fixed investment the saving fixes alone leave every real result unchanged
+  (consumption is `(C0/YH0)·YH` either way); C-6 on real GDP and the lump-sum transfers do
+  change them.
 
 ---
 
@@ -364,9 +420,10 @@ calibration).
   rate `ER` (E-2: `WPE = ER·PWE0`; T-21: `WPM = (1+zeta_t)·ER·PWM0`; T-20 then
   gives the producer's export price `PE = WPE/(1+tau_e)`). Imports (T-9) and
   exports (T-18) are independent, the SAM's own trade flows and final demand
-  are the benchmark (no rescale), and the trade deficit is booked as exogenous
-  foreign saving `Sfbar` (= CIF imports − FOB exports − export tax, the SAM's
-  `INV × ROW` net of `ROW × INV`). `C_BOP` (CIF imports − FOB exports = `Sf`)
+  are the benchmark (no rescale), and the current-account deficit is booked as
+  exogenous foreign saving `Sfbar` (= CIF imports − FOB exports − export tax − net
+  transfers to households, the SAM's `INV × ROW` net of `ROW × INV` less the transfer of
+  convention (7)). `C_BOP` (CIF imports − FOB exports = `Sf` + `PNUM·PABS·Σ WTRbar`)
   is imposed and the savings–investment balance C-9 is dropped, since by
   Walras' law it is the same restriction (`export_results!` reports its
   residual as `SI_gap`). Investment is then pinned by `C_INV`
@@ -518,15 +575,14 @@ good, for `:balanced`).
   (land supply becomes demand-determined: +141 % on KEN). See the `Factors.jl`
   header for the measurements and for the closure experiment that was tried and
   rejected.
-- **Household and government saving are not the SAM's.** The calibration sets household saving
-  to zero and lets the direct tax `kappa_h` hand all other domestic saving to the government
-  ("Calibration conventions"), so `SAV`, `Sg`, `YG` and `kappa_h` do not match the SAM's
-  institution accounts (their sum does). Remittances, aid and foreign borrowing are all in
-  foreign saving. Where `kappa_h < 0` the implied transfer to households is proportional to
-  their factor income, so household consumption moves `1 − kappa_h` times as much as factor
-  income (Lebanon 2.1×, Kyrgyzstan 3.1×) instead of resting on a lump-sum remittance. Reading
-  the SAM's household saving needs Y-8/D-3's double subtraction of `SAV` (`YD = C + 2·SAV`)
-  removed first, and changes every database.
+- **Transfers imputed from dissaving.** No exported SAM carries a transfer cell, so the transfer
+  booked where households dissave (convention (7)) is everything that finances the gap:
+  remittances, aid and foreign borrowing alike, all held fixed in real domestic terms. GTAP 12's
+  balance-of-payments flows (remittances `rmi`/`rmo` in `summary.json`'s `bop_flows`) would
+  separate the remittances; the pipeline would export them as `transfers.csv`. Aid to the
+  government is not separated (it stays in foreign saving and `S_G`). The households'
+  final-demand tax is inside `kappa_h` (`tau_Ac = 0`), so `GDP` is at market prices except for
+  that tax.
 - **Vintages carry no technology**: `Calibration.jl` gives Old and New capital
   identical shares and prices, so the dynamic update keeps the benchmark
   Old/New split (`vintage_rule=:benchmark_shares`); the flow-based split

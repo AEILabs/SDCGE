@@ -176,7 +176,9 @@ household column, `src/Calibration.jl:152`).
 | `TAX_EXP` × `ROW` | Export tax revenue (`src/Calibration.jl:144`) |
 | `HH` × factor rows | Factor income paid out to the household (all factor income routes through `HH`) |
 | `GOV` × tax rows | Tax revenue paid out to government |
-| institution × institution (`HH`/`GOV`/`INV`/`ROW`) | Transfers, savings, and the current-account closure |
+| `INV` × `HH`/`GOV`/`ROW` (net of the transposed cells) | Household saving `S_H`, government saving `S_G`, foreign saving: the benchmark reproduces `S_H` and `S_G` (`Calibration.jl` convention (6)) |
+| `HH` × `ROW` (net of `ROW` × `HH`) | Net current transfers from abroad to households, a lump sum fixed in real domestic terms (`WTRbar`, convention (7)); a `transfers.csv` next to `sam.csv` (`institution,value`, `HH`, SAM units) is folded into this cell on read |
+| `TAX_OUT` × `HH`/`GOV`/`INV` | Final-demand taxes: the households' is inside `kappa_h`, government's and investment's are `tau_Af` |
 
 ### 2.4 Balance requirement and RAS
 
@@ -218,7 +220,7 @@ defaults.").
 | `tau_m[·,·,i]` | Import tariff = `TAX_IMP_i / (imports_i + margin-on-imports_i)` | `Calibration.jl:143` |
 | `tau_e[·,·,i]` | **One economy-wide** export tax rate = `TAX_EXP_total / Σ_i ES0_i` (not sector-specific, despite the 3-key index) | `Calibration.jl:144` |
 | `lambda_w` | `:balanced` only: `(1+tau_m_i)(1+tau_e)` — forces CIF imports = FOB exports good-by-good (convention 2); `1.0` under `:bop`, where E-2/T-21 no longer use it | `Calibration.jl` (trade closure block) |
-| `Sfbar[r]`, `PWE0`, `PWM0`, `ER0`, `FDInv0`, `chi_inv` | `:bop` (default): exogenous foreign saving = `Σ XMT0/(1+tau_m) − Σ (1+tau_e)·ES0` (the SAM's trade deficit at world prices, booked on the home region), world prices `1+tau_e` / `1/(1+tau_m)` so every benchmark price is 1, `ER0 = 1`, exogenous real investment `FDInv0 = INVEST0` and its GDP share (used to re-base it between periods). `Sfbar = 0` under `:balanced` | `Calibration.jl` (trade closure and balance-of-payments blocks) |
+| `Sfbar[r]`, `PWE0`, `PWM0`, `ER0`, `FDInv0`, `chi_inv` | `:bop` (default): exogenous foreign saving = `Σ XMT0/(1+tau_m) − Σ (1+tau_e)·ES0 − WTRbar` (the SAM's current-account deficit at world prices, booked on the home region), world prices `1+tau_e` / `1/(1+tau_m)` so every benchmark price is 1, `ER0 = 1`, exogenous real investment `FDInv0 = INVEST0` and its GDP share (used to re-base it between periods). `Sfbar = 0` under `:balanced` | `Calibration.jl` (trade closure and balance-of-payments blocks) |
 | `alpha_nd`, `alpha_va`, `alpha_l`, `alpha_hktef`, `alpha_fert`, `alpha_hkte`, `alpha_e`, `alpha_hkt`, `alpha_h`, `alpha_kt`, `alpha_k`, `alpha_t`, `alpha_ff`, `alpha_ktel`, `alpha_tfd`, `alpha_feed`, `alpha_hkte_liv` | Every CES nest share = benchmark cost/value share, scaled `s_j·(P/P_j)^(1−σ)` with `σ=0.5`; collapses to the plain cost share when all nest prices are 1 | `Calibration.jl:259-301` |
 | `a_nd`, `alpha_ep`, `alpha_ft`, `alpha_fd` | Composition of the intermediate/energy/fertiliser/feed bundles = `IOc[j,i]/bundle_i`, or uniform `1/n` if the bundle is empty for that sector | `Calibration.jl:303-320` |
 | `lambda_k`, `lambda_t`, `lambda_f`, `lambda_ep`, `lambda_ft`, `lambda_fd`, `lambda_l`, `lambda_w` (efficiency, not the tariff `lambda_w` above) | Technical-change/efficiency indices = 1.0 in the benchmark year | `Calibration.jl:340-349` |
@@ -227,12 +229,13 @@ defaults.").
 | `UE0[l]` | `0.0` for every skill — "the SAM records labour payments, not an unemployment rate, so full employment is the only rate consistent with it" | `Calibration.jl:370-373` |
 | `chi_T[:land]`, `gamma_T[i]` | Ag-only land CET scale/shares; non-agricultural land payments in the SAM are **reassigned to capital** (convention 1) before this is computed | `Calibration.jl:94-100,381-384` |
 | `chi_F[i]`, `gamma_K[i]` | Sector-specific-factor scale and capital CET shares from the `NRES`/`CAP` rows | `Calibration.jl:386-388` |
-| `kappa_h` | Direct/income tax rate, **solved** (not read from `TAX_INC`) as the residual that makes C-9 (savings=investment) hold exactly: `kappa = 1 − (HH0+2·SAV0)/YH0` | `Calibration.jl:196-206` |
+| `kappa_h`, `SAV0`, `WTRbar` | Household saving `SAV0 = S_H − DeprY0` (the SAM's `INV × HH − HH × INV` less the Y-6 depreciation allowance), net current transfers from abroad `WTRbar` (the `HH × ROW` cell; where there is none and `SAV0 < 0`, the gap, with `SAV0 = 0`), and the direct-tax rate from the household budget, `kappa = 1 − (HH0 + SAV0)/YH0` (= `TAX_OUT × HH / YH0`) | `Calibration.jl` section 6, conventions (6), (7) |
+| `tau_Af[·,"Gov"/"Inv"]` | Final-demand tax rate of government / investment = `TAX_OUT × GOV` / G, `TAX_OUT × INV` / I | `Calibration.jl` section 6 |
 | `beta_m[i]`, `beta_d[i]`, `beta_es[i]`, `beta_xd[i]`, `alpha_dc/mc/df/mf` | Armington import/domestic and CET export/domestic-sales shares = benchmark value shares (nest prices are 1); the household/gov/inv-specific variants are just the aggregate share broadcast to every agent (no agent-specific data in the SAM) | `Calibration.jl:401-408` |
 | `theta[k,h]` | `0.0` — ELES subsistence quantities (convention 3, "the SAM carries no information on them") | `Calibration.jl:411` |
-| `mu_c[k,h]` | Household consumption budget share = `C0_k/YC0` | `Calibration.jl:412` |
+| `mu_c[k,h]` | Household consumption budget share = `C0_k/YC0` (`YC0 = YD0`; `1 − Σ mu_c` is the saving rate) | `Calibration.jl:412` |
 | `GammaC[i,k,h]` | `1` if `i==k` else `0` — one Armington composite per consumption good (diagonal) | `Calibration.jl:413-414` |
-| `a_f[i,"Gov"/"Inv"]`, `chi_gov` | Final-demand composition shares and government-spending share of GDP = `GOV0/GDP0` | `Calibration.jl:416-420` |
+| `a_f[i,"Gov"/"Inv"]`, `chi_gov`, `PAc0`, `PFD0`, `WPE0`, `WPM0` | Final-demand composition shares; government demand's share of real GDP `GOV0/GDP0` with `GDP0 = C + PFD0_gov·G + PFD0_inv·I + X − M` (gross output before 2026-10-07); the benchmark prices real GDP (M-2) is valued at | `Calibration.jl:416-420` |
 | `par[:bench]` (the `B` dict, ~35 keys) | The complete benchmark start-value table for every JuMP variable (`XP`, `ND`, `VA`, prices, nest quantities, capital/land/factor demands, trade flows, income/saving/GDP aggregates) — consumed **verbatim** by `initialize_from_sam!`, never re-derived | `Calibration.jl:436-466` |
 
 **Not derived from the SAM at all** (loader limitation, not a data question — see §4): `TAX_FACT`
@@ -260,7 +263,7 @@ unless the code is extended:
 | `beta_1`, `beta_2`, `beta_w` (regional/bilateral Armington weights), `beta_z` (CET bilateral export weights) | Uniform `1/|r|` or `1/(|r|·|rp|)` | `ParameterTables.jl:227-229,242` |
 | `tau_l` (payroll tax), `tau_t` (land tax), `tau_k` (capital tax) | `0.0` (never read from the SAM — §2.5) | `ParameterTables.jl:167,175,181` |
 | `chi_wmin` (minimum wage), `phi_wage` (wage-dispersion shares) | `1.0` | `ParameterTables.jl:168,166` |
-| `TRG`, `WTR`, `WTRgov_in/out`, `WTRinv_in/out`, `Sfbar` (transfers, foreign saving) | `0.0` | `ParameterTables.jl:140,144,255-258,260` |
+| `TRG`, `WTRbar`, `WTRgov_in/out`, `WTRinv_in/out`, `Sfbar` (transfers, foreign saving) | `0.0` | `ParameterTables.jl:140,144,255-258,260` |
 | `tau_pr`, `tau_in`, `tau_out`, `tau_trq_share` (TRQ), `zeta_t` (trade-margin cost) | `0.0` (inactive) | `ParameterTables.jl:244-248` |
 | `labour_closure` | `:fixed_wage` | `ParameterTables.jl:157` |
 | `numeraire` | `:pabs` | `ParameterTables.jl:162` |
